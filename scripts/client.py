@@ -3,6 +3,7 @@ Thin API client for OpenWebUI.
 Reads OPENWEBUI_URL and OPENWEBUI_API_KEY from .env.<ENV> on import.
 ENV defaults to "development"; override with: ENV=production python scripts/apply.py
 """
+import json
 import os
 from pathlib import Path
 
@@ -22,16 +23,20 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 
+def _dumps(payload: dict | list) -> bytes:
+    return json.dumps(payload, ensure_ascii=True).encode("ascii")
+
+
 def get(path: str, **kwargs) -> requests.Response:
     return requests.get(f"{BASE_URL}{path}", headers=_headers(), **kwargs)
 
 
 def post(path: str, json: dict | list, **kwargs) -> requests.Response:
-    return requests.post(f"{BASE_URL}{path}", headers=_headers(), json=json, **kwargs)
+    return requests.post(f"{BASE_URL}{path}", headers=_headers(), data=_dumps(json), **kwargs)
 
 
 def put(path: str, json: dict | list, **kwargs) -> requests.Response:
-    return requests.put(f"{BASE_URL}{path}", headers=_headers(), json=json, **kwargs)
+    return requests.put(f"{BASE_URL}{path}", headers=_headers(), data=_dumps(json), **kwargs)
 
 
 def delete(path: str, **kwargs) -> requests.Response:

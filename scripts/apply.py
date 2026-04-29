@@ -5,17 +5,22 @@ Usage:
     python scripts/apply.py                  # uses .env.development
     ENV=production python scripts/apply.py   # uses .env.production
 """
+import base64
+import io
 import json
 import os
 import re
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 # Make client importable when running from any working directory
 sys.path.insert(0, str(Path(__file__).parent))
 import client
 
 ROOT = Path(__file__).parent.parent
+ASSETS = ROOT / "assets" / "images"
 CONFIG = ROOT / "config"
 FUNCTIONS = ROOT / "functions"
 
@@ -38,7 +43,7 @@ def apply_connections() -> None:
     if not path.exists():
         print("  [skip] no connections file found")
         return
-    connections = json.loads(substitute_env(path.read_text()))
+    connections = json.loads(substitute_env(path.read_text(encoding="utf-8-sig")))
     for conn in connections:
         r = client.post("/api/v1/connections/openai/add", json=conn)
         _log("connection", conn.get("name", conn.get("id")), r)
@@ -46,14 +51,32 @@ def apply_connections() -> None:
 
 # ── Workspace models ───────────────────────────────────────────────────────────
 
+def _inject_image(model_id: str, payload: dict) -> dict:
+    """Convert image to WebP (max 256×256) and inject as base64 data URL, matching OpenWebUI's UI behaviour."""
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        img_path = ASSETS / f"{model_id}.{ext}"
+        if not img_path.exists():
+            continue
+        with Image.open(img_path) as im:
+            im.thumbnail((256, 256), Image.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, format="WEBP", quality=85)
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        payload.setdefault("meta", {})["profile_image_url"] = f"data:image/webp;base64,{b64}"
+        break
+    return payload
+
+
 def apply_models() -> None:
     models_dir = CONFIG / "models"
     if not models_dir.exists():
         print("  [skip] no models directory found")
         return
     for path in sorted(models_dir.glob("*.json")):
-        model = json.loads(path.read_text())
+        model = json.loads(path.read_text(encoding="utf-8-sig"))
         model_id = model.get("id", path.stem)
+        model = _inject_image(model_id, model)
+        print(f"  [debug] name={model.get('name')!r}")
         # Try to update; fall back to create
         r = client.get(f"/api/v1/models/model?id={model_id}")
         if r.status_code == 200:
@@ -81,7 +104,7 @@ def apply_functions() -> None:
             payload = {
                 "id": fn_id,
                 "name": fn_name,
-                "content": path.read_text(),
+                "content": path.read_text(encoding="utf-8-sig"),
                 "meta": {"type": fn_type},
             }
             r = client.get(f"/api/v1/functions/id/{fn_id}")
