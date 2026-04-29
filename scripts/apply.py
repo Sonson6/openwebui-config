@@ -23,6 +23,7 @@ ROOT = Path(__file__).parent.parent
 ASSETS = ROOT / "assets" / "images"
 CONFIG = ROOT / "config"
 FUNCTIONS = ROOT / "functions"
+TOOLS = ROOT / "tools"
 
 
 def substitute_env(text: str) -> str:
@@ -117,6 +118,48 @@ def apply_functions() -> None:
             _log(f"function ({verb})", fn_id, r)
 
 
+# ── Tools (LLM-callable Python functions) ─────────────────────────────────────
+
+_DOCSTRING_RE = re.compile(r'^\s*"""(.*?)"""', re.DOTALL)
+_FIELD_RE = re.compile(r"^\s*(title|description)\s*:\s*(.+)$", re.MULTILINE | re.IGNORECASE)
+
+
+def _parse_tool_metadata(content: str, fallback_id: str) -> tuple[str, str]:
+    """Extract `title` and `description` from the tool file's leading docstring."""
+    m = _DOCSTRING_RE.match(content)
+    if not m:
+        return fallback_id.replace("_", " ").title(), ""
+    header = m.group(1)
+    fields = {k.lower(): v.strip() for k, v in _FIELD_RE.findall(header)}
+    name = fields.get("title", fallback_id.replace("_", " ").title())
+    description = fields.get("description", "")
+    return name, description
+
+
+def apply_tools() -> None:
+    if not TOOLS.exists():
+        print("  [skip] no tools directory found")
+        return
+    for path in sorted(TOOLS.glob("*.py")):
+        tool_id = path.stem.lower()  # alphanumeric + underscores only
+        content = path.read_text(encoding="utf-8-sig")
+        name, description = _parse_tool_metadata(content, tool_id)
+        payload = {
+            "id": tool_id,
+            "name": name,
+            "content": content,
+            "meta": {"description": description, "manifest": {}},
+        }
+        r = client.get(f"/api/v1/tools/id/{tool_id}")
+        if r.status_code == 200:
+            r = client.post(f"/api/v1/tools/id/{tool_id}/update", json=payload)
+            verb = "updated"
+        else:
+            r = client.post("/api/v1/tools/create", json=payload)
+            verb = "created"
+        _log(f"tool ({verb})", tool_id, r)
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _log(kind: str, name: str, r) -> None:
@@ -141,6 +184,9 @@ def main() -> None:
 
     print("\n── Functions ──")
     apply_functions()
+
+    print("\n── Tools ──")
+    apply_tools()
 
     print("\nDone.")
 
