@@ -1,0 +1,9 @@
+[
+  {
+    "id": "primary",
+    "name": "Primary LLM",
+    "url": "${OPENAI_API_BASE_URL}",
+    "key": "${OPENAI_API_KEY}",
+    "enable": true
+  }
+]

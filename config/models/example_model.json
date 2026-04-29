@@ -1,0 +1,14 @@
+{
+  "id": "my-assistant",
+  "name": "My Assistant",
+  "base_model_id": "llama3.1",
+  "meta": {
+    "description": "A custom assistant with a predefined system prompt.",
+    "profile_image_url": ""
+  },
+  "params": {
+    "system": "You are a helpful assistant. Be concise and precise.",
+    "temperature": 0.7,
+    "max_tokens": 2048
+  }
+}

@@ -1,0 +1,24 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.1.0"
+tag_format = "v$version"
+update_changelog_on_bump = true
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# functions/ contain OpenWebUI plugin code with no type stubs — ignore there
+exclude = ["functions/"]
+# third-party libs without bundled stubs
+ignore_missing_imports = true

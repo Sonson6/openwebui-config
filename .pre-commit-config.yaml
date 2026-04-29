@@ -1,0 +1,39 @@
+repos:
+  # ── Built-in checks ───────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-json             # validates all JSON files in config/
+      - id: check-yaml             # validates doppler.yaml
+      - id: detect-private-key     # last-resort guard against committed secrets
+      - id: end-of-file-fixer      # ensures files end with a newline
+      - id: trailing-whitespace    # removes trailing whitespace
+      - id: check-merge-conflict   # catches leftover conflict markers
+      - id: check-added-large-files
+        args: [--maxkb=500]
+
+  # ── Ruff — lint + format ──────────────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ── Commitizen — enforce conventional commit messages ────────────────────────
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.27.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # ── Mypy — static type checking ───────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        files: ^(scripts|tests)/
+        additional_dependencies:
+          - pydantic>=2.0
+          - requests
+          - types-requests

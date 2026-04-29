@@ -1,0 +1,21 @@
+# Environment — only *.example templates are committed, never real credential files.
+# .env.example documents all variables; per-env templates are .env.*.example.
+.env.development
+.env.production
+.env.*.local
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
