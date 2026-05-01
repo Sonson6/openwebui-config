@@ -4,14 +4,15 @@ description: Conversational SQL agent for CSV/Excel files using DuckDB.
              Generates SQL, executes it, interprets results, and optionally plots.
              Uses structured-output intent routing for follow-up messages.
 author: openweb-ui-local
-version: 0.2.0
+version: 0.2.1
 requirements: duckdb, openpyxl, pandas, tabulate, matplotlib, openai
 """
 
 import base64
 import io
+import time
 from pathlib import Path
-from typing import AsyncGenerator, Literal, Optional
+from typing import Literal, Optional
 
 import duckdb
 import openai
@@ -89,6 +90,12 @@ If new SQL analysis is needed, say so and guide the user to ask a specific analy
 
 
 class Pipe:
+    # Open WebUI calls pipe() 3× per message (known bug #17472).
+    # We use a class-level time-keyed dict so only the first call emits status
+    # events; duplicates arriving within _DEDUP_TTL seconds are silenced.
+    _dedup: dict[str, float] = {}
+    _DEDUP_TTL: float = 10.0  # seconds — wide enough to catch all 3 rapid calls
+
     class Valves(BaseModel):
         LLM_API_BASE_URL: str = Field(
             default="http://localhost:11434/v1",
@@ -574,24 +581,38 @@ class Pipe:
         __files__: list[dict] = [],
         __chat_id__: Optional[str] = None,
         __event_emitter__=None,
-    ) -> AsyncGenerator:
-        emit = lambda msg, done=False: self._emit(__event_emitter__, msg, done)
-
+    ) -> str:
         messages: list[dict] = body.get("messages", [])
         user_messages = [m for m in messages if m["role"] == "user"]
         is_first_message = len(user_messages) <= 1
         user_question = user_messages[-1].get("content", "") if user_messages else ""
 
+        # ── Duplicate-call guard ──────────────────────────────────────────────
+        # Open WebUI triggers pipe() 3× per message (bug #17472).  All three
+        # calls share the same message_id, so their status events pile up in the
+        # same bubble.  We let only the first call within _DEDUP_TTL seconds
+        # emit status events; the rest process silently and return the result.
+        dedup_key = f"{__chat_id__}|{user_question[:120]}"
+        now = time.monotonic()
+        is_duplicate = (now - Pipe._dedup.get(dedup_key, 0.0)) < self._DEDUP_TTL
+        if not is_duplicate:
+            Pipe._dedup[dedup_key] = now
+
+        if is_duplicate:
+            async def _noop(_event): pass  # swallow all status events
+            emit = _noop
+        else:
+            emit = lambda msg, done=False: self._emit(__event_emitter__, msg, done)
+
         # 1. Locate the data file ─────────────────────────────────────────────
         await emit("Locating data file...")
         file_meta = self._find_file_meta(messages, __files__, body, __chat_id__)
         if file_meta is None:
-            yield (
+            await emit("No file — stopped", done=True)
+            return (
                 "**No structured data file found.**\n\n"
                 "Please upload a CSV or Excel file alongside your message so I can analyse it."
             )
-            await emit("No file — stopped", done=True)
-            return
 
         if __chat_id__:
             self._file_cache[__chat_id__] = file_meta
@@ -599,18 +620,16 @@ class Pipe:
         file_path = self._resolve_path(file_meta)
         if file_path is None:
             name = file_meta.get("name", file_meta.get("filename", "unknown"))
-            yield f"**Could not locate `{name}` on disk.**\n\nThe file may have expired. Please re-upload it."
             await emit("File not on disk — stopped", done=True)
-            return
+            return f"**Could not locate `{name}` on disk.**\n\nThe file may have expired. Please re-upload it."
 
         # 2. Read schema ───────────────────────────────────────────────────────
         await emit(f"Reading `{file_path.name}`...")
         try:
             file_description, reader = self._describe_schema(file_path)
         except Exception as exc:
-            yield f"**Error reading file:** {exc}"
             await emit("Read error", done=True)
-            return
+            return f"**Error reading file:** {exc}"
 
         # 3. Classify intent ───────────────────────────────────────────────────
         if is_first_message:
@@ -632,5 +651,5 @@ class Pipe:
         except Exception as exc:
             response = f"**Error:** {exc}"
 
-        yield response
         await emit("Done", done=True)
+        return response
