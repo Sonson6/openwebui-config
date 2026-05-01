@@ -23,6 +23,7 @@ ROOT = Path(__file__).parent.parent
 ASSETS = ROOT / "assets" / "images"
 CONFIG = ROOT / "config"
 FUNCTIONS = ROOT / "functions"
+PROMPTS = CONFIG / "prompts"
 TOOLS = ROOT / "tools"
 
 
@@ -87,6 +88,26 @@ def apply_models() -> None:
             r = client.post("/api/v1/models/create", json=model)
             verb = "created"
         _log(f"model ({verb})", model_id, r)
+
+
+# ── Prompts (skills) ──────────────────────────────────────────────────────────
+
+def apply_prompts() -> None:
+    if not PROMPTS.exists():
+        print("  [skip] no prompts directory found")
+        return
+    for path in sorted(PROMPTS.glob("*.json")):
+        prompt = json.loads(path.read_text(encoding="utf-8-sig"))
+        command = prompt.get("command", path.stem)
+        r = client.get(f"/api/v1/prompts/command/{command}")
+        if r.status_code == 200:
+            prompt_id = r.json().get("id")
+            r = client.post(f"/api/v1/prompts/id/{prompt_id}/update", json=prompt)
+            verb = "updated"
+        else:
+            r = client.post("/api/v1/prompts/create", json=prompt)
+            verb = "created"
+        _log(f"prompt ({verb})", command, r)
 
 
 # ── Functions (actions / pipes / filters) ─────────────────────────────────────
@@ -181,6 +202,9 @@ def main() -> None:
 
     print("\n── Models ──")
     apply_models()
+
+    print("\n── Prompts ──")
+    apply_prompts()
 
     print("\n── Functions ──")
     apply_functions()

@@ -1,0 +1,5 @@
+{
+  "command": "doc-resume",
+  "name": "Document — Résumé",
+  "content": "Réalise un résumé du document joint.\n\n**Paramètres** — si non précisés, demande-les en une seule fois :\n- Longueur : express (5-10 bullets) | standard (1 page) | détaillé (plusieurs pages)\n- Format : bullet points | paragraphes rédigés | structure avec titres et sous-sections\n- Langue de sortie : (même que le document par défaut)\n- Focus : tout le document | sections ou thématiques spécifiques : [préciser]\n\n**Plan d'exécution :**\n1. Lis l'intégralité du document et identifie sa structure globale (parties, sections, thèmes).\n2. Pour chaque section, extrais l'idée principale et les informations clés.\n3. Évalue le poids relatif de chaque partie pour prioriser ce qui mérite d'apparaître dans le résumé.\n4. Rédige le résumé en respectant la longueur et le format demandés.\n5. Vérifie qu'aucun point essentiel n'a été omis et qu'aucun élément hors document n'a été ajouté.\n6. Indique entre parenthèses la source (page, section) pour chaque point important."
+}

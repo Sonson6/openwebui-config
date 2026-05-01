@@ -1,0 +1,5 @@
+{
+  "command": "doc-extraction",
+  "name": "Document — Extraction d'informations",
+  "content": "Extrais les informations demandées du document joint.\n\n**Paramètres** — si non précisés, demande-les en une seule fois :\n- Type d'informations : dates | montants | noms et entités | clauses et obligations | risques | actions à mener | autre : [préciser]\n- Format de sortie : tableau | liste à puces | JSON\n- Langue de sortie : (même que le document par défaut)\n\n**Plan d'exécution :**\n1. Parcours l'intégralité du document de manière systématique, section par section.\n2. Repère chaque occurrence correspondant au type d'information demandé sans en ignorer.\n3. Pour chaque élément extrait, note sa localisation exacte (page, section, paragraphe).\n4. Dédoublonne les entrées redondantes tout en conservant les nuances importantes.\n5. Structure la sortie dans le format demandé (tableau, liste, JSON).\n6. Ajoute une colonne ou un champ \"Source\" indiquant la localisation de chaque entrée.\n7. Si certaines informations semblent incomplètes ou ambiguës dans le document, signale-le explicitement."
+}

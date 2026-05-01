@@ -1,0 +1,5 @@
+{
+  "command": "doc-comparaison",
+  "name": "Document — Comparaison",
+  "content": "Compare les documents joints.\n\n**Paramètres** — si non précisés, demande-les en une seule fois :\n- Axes de comparaison : dates | clauses et obligations | prix et montants | structure et organisation | argumentation | autre : [préciser]\n- Format de sortie : tableau comparatif | synthèse narrative | les deux\n- Langue de sortie : (même que les documents par défaut)\n\n**Plan d'exécution :**\n1. Lis chaque document séparément et établis une fiche de synthèse interne pour chacun.\n2. Identifie les axes communs sur lesquels la comparaison est possible.\n3. Pour chaque axe, relève la position ou la valeur dans chaque document en citant la source.\n4. Repère les points de convergence et les divergences significatives.\n5. Si le format tableau est demandé : construis un tableau avec les documents en colonnes et les axes en lignes.\n6. Si la synthèse narrative est demandée : rédige une analyse ordonnée par axe, en soulignant les différences clés.\n7. Conclus avec un résumé des divergences les plus importantes et, si pertinent, une recommandation."
+}

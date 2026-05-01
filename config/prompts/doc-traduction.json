@@ -1,0 +1,5 @@
+{
+  "command": "doc-traduction",
+  "name": "Document — Traduction",
+  "content": "Traduis le document joint.\n\n**Paramètres** — si non précisés, demande-les en une seule fois :\n- Langue cible : [obligatoire]\n- Ton : formel | neutre | accessible\n- Périmètre : tout le document | sections spécifiques : [préciser]\n\n**Plan d'exécution :**\n1. Identifie la langue source et confirme-la si elle n'est pas explicitement précisée.\n2. Lis le document dans son intégralité pour comprendre le contexte global avant de traduire.\n3. Traduis en préservant le sens exact, le registre et la structure logique — ne paraphrase pas.\n4. Adapte les expressions idiomatiques, unités de mesure et formats de date à la langue cible.\n5. Maintiens la cohérence terminologique tout au long du document (même terme source = même terme cible).\n6. Produis la sortie en markdown structuré ; ne tente pas de reproduire la mise en page exacte du document original.\n7. Si un passage est ambigu ou intraduisible littéralement, indique-le en note entre crochets [Note : ...]."
+}
