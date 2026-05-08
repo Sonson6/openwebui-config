@@ -2,12 +2,12 @@
 title: PII Redactor
 description: Detects and redacts personally identifiable information in user messages
              before they reach the LLM provider. Covered entity types (each toggleable):
-             email addresses, phone numbers, credit card numbers (Luhn-validated),
-             IBANs (modulo-97 validated), French NIR (numéro de sécurité sociale),
-             and French SIRET (Luhn-validated).
+             email addresses, Canadian phone numbers (NANP), credit card numbers
+             (Luhn-validated), IBANs (modulo-97 validated), Canadian SIN / Business
+             Numbers (Luhn-validated), and Canadian postal codes.
              Sends a non-blocking warning in the chat when redaction occurs.
 author: openweb-ui-local
-version: 0.1.0
+version: 0.2.0
 """
 
 import re
@@ -47,9 +47,8 @@ _EMAIL_RE = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b")
 _PHONE_RE = re.compile(
     r"(?<!\d)"
     r"(?:"
-    r"\+33\s?[1-9](?:[\s.\-]?\d{2}){4}"       # French international (+33)
-    r"|0[1-9](?:[\s.\-]?\d{2}){4}"             # French local (0X XX XX XX XX)
-    r"|\+\d{1,3}[\s.\-]?\(?\d{1,4}\)?[\s.\-]?\d{4,10}"  # Generic international
+    r"(?:\+1[\s.\-]?)?\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}"  # NANP: (416) 555-1234 / +1 416 555 1234
+    r"|\+1\d{10}"                                              # NANP compact: +14165551234
     r")"
     r"(?!\d)"
 )
@@ -62,13 +61,16 @@ _IBAN_CANDIDATE_RE = re.compile(
     r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}[A-Z0-9]{0,3}\b"
 )
 
-# French NIR: 15 digits — sex digit (1/2) + YY + valid month + rest
-_NIR_RE = re.compile(
-    r"\b[12]\d{2}(?:0[1-9]|1[0-2]|20)\d{10}\b"
-)
+# Canadian SIN / Business Number: 9 digits with optional dashes (NNN-NNN-NNN) or compact;
+# Luhn-validated below to reduce false positives. SINs starting with 0 are invalid.
+_SIN_CANDIDATE_RE = re.compile(r"\b[1-9]\d{2}[\s\-]?\d{3}[\s\-]?\d{3}\b")
 
-# SIRET: exactly 14 consecutive digits; Luhn-validated below
-_SIRET_CANDIDATE_RE = re.compile(r"\b\d{14}\b")
+# Canadian postal code: letter-digit-letter [space] digit-letter-digit
+# First letter restricted to valid FSA characters (no D, F, I, O, Q, U)
+_POSTAL_RE = re.compile(
+    r"\b[ABCEGHJKLMNPRSTVXY]\d[ABCEGHJKLMNPRSTVWXYZ][\s\-]?\d[ABCEGHJKLMNPRSTVWXYZ]\d\b",
+    re.IGNORECASE,
+)
 
 
 # ── Per-type redaction helpers ─────────────────────────────────────────────────
@@ -100,17 +102,18 @@ def _redact_iban(text: str) -> tuple[str, int]:
     return _IBAN_CANDIDATE_RE.sub(replace, text), count
 
 
-def _redact_siret(text: str) -> tuple[str, int]:
+def _redact_sin(text: str) -> tuple[str, int]:
     count = 0
 
     def replace(m: re.Match) -> str:
         nonlocal count
-        if _luhn_valid(m.group(0)):
+        digits_only = re.sub(r"[\s\-]", "", m.group(0))
+        if len(digits_only) == 9 and _luhn_valid(digits_only):
             count += 1
-            return "[REDACTED:SIRET]"
+            return "[REDACTED:SIN]"
         return m.group(0)
 
-    return _SIRET_CANDIDATE_RE.sub(replace, text), count
+    return _SIN_CANDIDATE_RE.sub(replace, text), count
 
 
 def _redact_all(text: str, valves: "Filter.Valves") -> tuple[str, list[str]]:
@@ -140,17 +143,17 @@ def _redact_all(text: str, valves: "Filter.Valves") -> tuple[str, list[str]]:
             text = new
             found.append("IBAN")
 
-    if valves.redact_nir:
-        new, n = _NIR_RE.subn("[REDACTED:NIR]", text)
+    if valves.redact_sin:
+        new, n = _redact_sin(text)
         if n:
             text = new
-            found.append("NIR (numéro de sécurité sociale)")
+            found.append("SIN / Business Number")
 
-    if valves.redact_siret:
-        new, n = _redact_siret(text)
+    if valves.redact_postal_code:
+        new, n = _POSTAL_RE.subn("[REDACTED:POSTAL]", text)
         if n:
             text = new
-            found.append("SIRET")
+            found.append("postal code")
 
     return text, found
 
@@ -190,14 +193,17 @@ class Filter:
         redact_email: bool = Field(default=True)
         redact_phone: bool = Field(default=True)
         redact_credit_card: bool = Field(default=True)
-        redact_iban: bool = Field(default=True)
-        redact_nir: bool = Field(
-            default=True,
-            description="French numéro de sécurité sociale (15-digit NIR)",
+        redact_iban: bool = Field(
+            default=False,
+            description="IBAN (modulo-97 validated) — uncommon in Canada, off by default",
         )
-        redact_siret: bool = Field(
+        redact_sin: bool = Field(
             default=True,
-            description="French SIRET — 14-digit company identifier, Luhn-validated",
+            description="Canadian SIN / Business Number — 9-digit, Luhn-validated",
+        )
+        redact_postal_code: bool = Field(
+            default=False,
+            description="Canadian postal codes (A1A 1A1 format) — off by default to reduce false positives",
         )
         scan_all_messages: bool = Field(
             default=False,
