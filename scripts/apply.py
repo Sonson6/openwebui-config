@@ -92,13 +92,31 @@ def apply_models() -> None:
 
 # ── Prompts (skills) ──────────────────────────────────────────────────────────
 
+def _parse_prompt_md(path: Path) -> dict:
+    """Parse a markdown file with YAML frontmatter into a prompt payload."""
+    text = path.read_text(encoding="utf-8-sig")
+    if not text.startswith("---"):
+        raise ValueError(f"{path.name}: missing frontmatter (expected --- block)")
+    _, front, body = text.split("---", 2)
+    meta: dict = {}
+    for line in front.strip().splitlines():
+        if ":" in line:
+            key, _, val = line.partition(":")
+            meta[key.strip()] = val.strip()
+    return {
+        "command": meta["command"],
+        "name": meta["name"],
+        "content": body.strip(),
+    }
+
+
 def apply_prompts() -> None:
     if not PROMPTS.exists():
         print("  [skip] no prompts directory found")
         return
-    for path in sorted(PROMPTS.glob("*.json")):
-        prompt = json.loads(path.read_text(encoding="utf-8-sig"))
-        command = prompt.get("command", path.stem)
+    for path in sorted(PROMPTS.glob("*.md")):
+        prompt = _parse_prompt_md(path)
+        command = prompt["command"]
         r = client.get(f"/api/v1/prompts/command/{command}")
         if r.status_code == 200:
             prompt_id = r.json().get("id")

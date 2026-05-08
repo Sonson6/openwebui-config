@@ -1,0 +1,40 @@
+# LiteLLM Proxy — configuration développement
+#
+# Wildcard par provider : LiteLLM route automatiquement vers le bon provider
+# en fonction du préfixe du nom de modèle (ex: "anthropic/claude-opus-4-5").
+# Tous les modèles accessibles via ton abonnement sont disponibles sans les
+# lister un par un.
+#
+# Utilisation depuis OpenWebUI (ou n'importe quel client OpenAI-compatible) :
+#   model: "openai/gpt-4o"
+#   model: "anthropic/claude-opus-4-5"
+#   model: "gemini/gemini-2.5-pro-preview-05-06"
+
+model_list:
+
+  # ── OpenAI ────────────────────────────────────────────────────────────────
+  # Couvre : gpt-4o, gpt-4o-mini, o1, o3, gpt-4.1, etc.
+  - model_name: "openai/*"
+    litellm_params:
+      model: "openai/*"
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ── Anthropic ─────────────────────────────────────────────────────────────
+  # Couvre : claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5, etc.
+  - model_name: "anthropic/*"
+    litellm_params:
+      model: "anthropic/*"
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ── Google AI Studio (Gemini) ─────────────────────────────────────────────
+  # Couvre : gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash, etc.
+  - model_name: "gemini/*"
+    litellm_params:
+      model: "gemini/*"
+      api_key: os.environ/GEMINI_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+  # En dev : logs verbeux pour déboguer facilement
+  set_verbose: true
