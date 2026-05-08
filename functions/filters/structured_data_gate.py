@@ -27,7 +27,7 @@ def _is_structured(file: dict) -> bool:
 
 class Filter:
     class Valves(BaseModel):
-        priority: int = Field(default=0, description="Execution order (lower runs first)")
+        priority: int = Field(default=50, description="Execution order (lower runs first)")
         enabled: bool = Field(default=True, description="Enable/disable the gate")
 
     def __init__(self):

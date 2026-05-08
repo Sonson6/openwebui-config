@@ -127,8 +127,8 @@ def _strip_injected_content(text: str, file_names: set[str], debug: bool) -> tup
 class Filter:
     class Valves(BaseModel):
         priority: int = Field(
-            default=1,
-            description="Run after structured_data_gate (priority 0)",
+            default=51,
+            description="Run after structured_data_gate (priority 50)",
         )
         enabled: bool = Field(
             default=True,

@@ -1,4 +1,5 @@
 services:
+
   litellm:
     image: ghcr.io/berriai/litellm:main-stable
     ports:
@@ -15,3 +16,31 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "3000:8080"
+    volumes:
+      - open-webui-data:/app/backend/data
+    environment:
+      # Pointe vers LiteLLM (nom de service Docker, pas localhost)
+      - OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY}
+      # Désactive le signup — instance personnelle
+      - ENABLE_SIGNUP=False
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      # Désactive Ollama (on passe uniquement par LiteLLM)
+      - ENABLE_OLLAMA_API=False
+      # STT — passe par LiteLLM pour garder un seul point d'entrée
+      - AUDIO_STT_ENGINE=openai
+      - AUDIO_STT_OPENAI_API_BASE_URL=http://litellm:4000/v1
+      - AUDIO_STT_OPENAI_API_KEY=${LITELLM_MASTER_KEY}
+      - AUDIO_STT_MODEL=gpt-4o-transcribe
+    depends_on:
+      litellm:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  open-webui-data:
