@@ -90,10 +90,10 @@ def apply_models() -> None:
         _log(f"model ({verb})", model_id, r)
 
 
-# ── Prompts (skills) ──────────────────────────────────────────────────────────
+# ── Skills (prompts) ──────────────────────────────────────────────────────────
 
-def _parse_prompt_md(path: Path) -> dict:
-    """Parse a markdown file with YAML frontmatter into a prompt payload."""
+def _parse_skill_md(path: Path) -> dict:
+    """Parse a markdown file with YAML frontmatter into a skill payload."""
     text = path.read_text(encoding="utf-8-sig")
     if not text.startswith("---"):
         raise ValueError(f"{path.name}: missing frontmatter (expected --- block)")
@@ -110,22 +110,27 @@ def _parse_prompt_md(path: Path) -> dict:
     }
 
 
-def apply_prompts() -> None:
+def upload_skill(path: Path) -> None:
+    """Create or update a single skill from a markdown file."""
+    skill = _parse_skill_md(path)
+    command = skill["command"]
+    r = client.get(f"/api/v1/prompts/command/{command}")
+    if r.status_code == 200:
+        skill_id = r.json().get("id")
+        r = client.post(f"/api/v1/prompts/id/{skill_id}/update", json=skill)
+        verb = "updated"
+    else:
+        r = client.post("/api/v1/prompts/create", json=skill)
+        verb = "created"
+    _log(f"skill ({verb})", command, r)
+
+
+def apply_skills() -> None:
     if not PROMPTS.exists():
         print("  [skip] no prompts directory found")
         return
     for path in sorted(PROMPTS.glob("*.md")):
-        prompt = _parse_prompt_md(path)
-        command = prompt["command"]
-        r = client.get(f"/api/v1/prompts/command/{command}")
-        if r.status_code == 200:
-            prompt_id = r.json().get("id")
-            r = client.post(f"/api/v1/prompts/id/{prompt_id}/update", json=prompt)
-            verb = "updated"
-        else:
-            r = client.post("/api/v1/prompts/create", json=prompt)
-            verb = "created"
-        _log(f"prompt ({verb})", command, r)
+        upload_skill(path)
 
 
 # ── Functions (actions / pipes / filters) ─────────────────────────────────────
@@ -221,8 +226,8 @@ def main() -> None:
     print("\n── Models ──")
     apply_models()
 
-    print("\n── Prompts ──")
-    apply_prompts()
+    print("\n── Skills ──")
+    apply_skills()
 
     print("\n── Functions ──")
     apply_functions()
