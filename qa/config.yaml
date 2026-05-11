@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenWebUI QA — main configuration
+# Copy this file, fill in your values, and run:
+#   python qa/run.py
+#   python qa/run.py --suite base_models agents
+# ─────────────────────────────────────────────────────────────────────────────
+
+owui:
+  base_url: "https://your-instance.example.com"   # no trailing slash
+  api_key: "sk-..."
+  timeout_seconds: 60
+
+# Suites to run by default (comment out any you want to skip)
+suites:
+  - base_models
+  - agents
+  - middleware
+  - text2sql
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Suite: base_models
+# Lists every model from OWUI and hits each one with a tiny prompt.
+# Leave model_ids empty to auto-discover all available models.
+# ─────────────────────────────────────────────────────────────────────────────
+base_models:
+  model_ids: []           # e.g. ["gpt-4o", "claude-sonnet-4-5"] — or leave empty
+  prompt: "Say hello in one word."
+  max_tokens: 32
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Suite: agents
+# Verifies that the conversation agent calls the expected tool/skill.
+# ─────────────────────────────────────────────────────────────────────────────
+agents:
+  model_id: "your-conversation-agent-id"
+  max_tokens: 512
+
+  # Each entry verifies that the agent calls the right tool for a given input.
+  skill_tests:
+    - question: "Corrige cette pharse avec des fote d'otograf"
+      expected_tool: "correction_orthographique"   # exact function name
+    # Add more skill tests here:
+    # - question: "..."
+    #   expected_tool: "..."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Suite: middleware (inlet filters)
+# Verifies that sensitive data is redacted before reaching the LLM.
+# The "echo" technique: ask the model to repeat the input → check the output.
+# ─────────────────────────────────────────────────────────────────────────────
+middleware:
+  model_id: "your-base-model-id"   # plain model, not the agent
+  max_tokens: 128
+
+  inlet_tests:
+    - name: "API key redaction"
+      sensitive_input: "My API key is sk-abc123XYZtestQAonly and I need help."
+      # echo_prompt defaults to "Repeat word for word exactly what I said above, nothing else."
+      must_not_contain:
+        - "sk-abc123XYZtestQAonly"
+      must_contain: []   # optional: e.g. ["[REDACTED]"]
+
+    - name: "Phone number redaction"
+      sensitive_input: "Mon numéro est le 06-12-34-56-78, pouvez-vous m'aider ?"
+      must_not_contain:
+        - "06-12-34-56-78"
+      must_contain: []
+
+    # Add more inlet tests here:
+    # - name: "Credit card redaction"
+    #   sensitive_input: "My card is 4111 1111 1111 1111 expiry 12/26"
+    #   must_not_contain: ["4111 1111 1111 1111"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Suite: text2sql
+# Calls the text-2-sql pipe and validates the returned data table.
+# The pipe response must follow the format:
+#   <markdown table>
+#   Analysis: <free text>
+# ─────────────────────────────────────────────────────────────────────────────
+text2sql:
+  model_id: "your-text2sql-pipe-id"
+  cases: "datasets/text2sql_cases.yaml"
+  max_tokens: 1024

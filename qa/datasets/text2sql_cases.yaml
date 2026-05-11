@@ -1,0 +1,48 @@
+# Text-2-SQL test cases against the Generation 1 Pokémon DuckDB dataset.
+#
+# Format:
+#   question      : natural language query sent to the pipe
+#   expected_rows : list of rows the table in the response must match exactly
+#                   (after "Analysis:" is stripped, header row ignored)
+#
+# Cell comparison is case-insensitive and numeric-aware.
+# Adjust expected_rows to match your exact DuckDB column names/values.
+
+- question: "Which Generation 1 Pokémon has the highest HP?"
+  expected_rows:
+    - ["Chansey", 250]
+
+- question: "What is the base speed of Electrode?"
+  expected_rows:
+    - ["Electrode", 140]
+
+- question: "List all pure Fire type Pokémon from Generation 1, sorted by name"
+  expected_rows:
+    - ["Arcanine", "Fire"]
+    - ["Charmander", "Fire"]
+    - ["Charmeleon", "Fire"]
+    - ["Flareon", "Fire"]
+    - ["Growlithe", "Fire"]
+    - ["Magmar", "Fire"]
+    - ["Ninetales", "Fire"]
+    - ["Ponyta", "Fire"]
+    - ["Rapidash", "Fire"]
+    - ["Vulpix", "Fire"]
+
+- question: "Which Generation 1 Pokémon has the highest base Attack stat?"
+  expected_rows:
+    - ["Dragonite", 134]
+
+- question: "How many Pokémon in Generation 1 have a base HP above 100?"
+  expected_rows:
+    - [6]
+
+- question: "What is the total base stat of Mewtwo?"
+  expected_rows:
+    - ["Mewtwo", 680]
+
+- question: "List the top 3 fastest Generation 1 Pokémon"
+  expected_rows:
+    - ["Electrode", 140]
+    - ["Jolteon", 130]
+    - ["Aerodactyl", 130]
