@@ -106,6 +106,7 @@ def _parse_skill_md(path: Path) -> dict:
     return {
         "command": meta["command"],
         "name": meta["name"],
+        "description": meta.get("description", ""),
         "content": body.strip(),
     }
 
@@ -113,16 +114,23 @@ def _parse_skill_md(path: Path) -> dict:
 def upload_skill(path: Path) -> None:
     """Create or update a single skill from a markdown file."""
     skill = _parse_skill_md(path)
-    command = skill["command"]
-    r = client.get(f"/api/v1/prompts/command/{command}")
+    skill_id = skill.pop("command").lstrip("/")  # skills use id, not command
+    payload = {
+        "id": skill_id,
+        "name": skill["name"],
+        "content": skill["content"],
+        "description": skill.get("description", ""),
+        "meta": {"tags": []},
+        "is_active": True,
+    }
+    r = client.get(f"/api/v1/skills/id/{skill_id}")
     if r.status_code == 200:
-        skill_id = r.json().get("id")
-        r = client.post(f"/api/v1/prompts/id/{skill_id}/update", json=skill)
+        r = client.post(f"/api/v1/skills/id/{skill_id}/update", json=payload)
         verb = "updated"
     else:
-        r = client.post("/api/v1/prompts/create", json=skill)
+        r = client.post("/api/v1/skills/create", json=payload)
         verb = "created"
-    _log(f"skill ({verb})", command, r)
+    _log(f"skill ({verb})", skill_id, r)
 
 
 def apply_skills() -> None:
