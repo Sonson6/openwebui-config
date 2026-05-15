@@ -1,40 +1,252 @@
-# LiteLLM Proxy — configuration développement
+# ═══════════════════════════════════════════════════════════════════════════════
+# LiteLLM Proxy — Production Configuration
 #
-# Wildcard par provider : LiteLLM route automatiquement vers le bon provider
-# en fonction du préfixe du nom de modèle (ex: "anthropic/claude-opus-4-5").
-# Tous les modèles accessibles via ton abonnement sont disponibles sans les
-# lister un par un.
+# Topology : 4 nodes, each running { OpenWebUI + LiteLLM } via docker-compose.
+#            All 4 LiteLLM instances share a single Redis (10.0.2.171:6379)
+#            for synchronized cooldown and latency state. Without Redis, a
+#            model downed on node 1 would stay live on nodes 2-4.
 #
-# Utilisation depuis OpenWebUI (ou n'importe quel client OpenAI-compatible) :
-#   model: "openai/gpt-4o"
-#   model: "anthropic/claude-opus-4-5"
-#   model: "gemini/gemini-2.5-pro-preview-05-06"
+# Model naming : model_name matches the provider/model-id convention so that
+#                OpenWebUI base models map 1:1 to LiteLLM entries. Agent logic
+#                (system prompts, tools) lives entirely in OpenWebUI — LiteLLM
+#                only handles routing, retries, and fallbacks.
+#
+# ── Fallback chains (circular cross-provider) ───────────────────────────────
+#
+#   openai/gpt-5.5               ──► openai/gpt-5
+#                                       └──► anthropic/claude-sonnet-4-6  (⚡ cross-provider)
+#
+#   anthropic/claude-sonnet-4-6  ──► anthropic/claude-sonnet-4-5
+#                                       └──► gemini/gemini-3.1-flash      (⚡ cross-provider)
+#
+#   gemini/gemini-3.1-flash      ──► gemini/gemini-3.1-flash-lite
+#                                       └──► openai/gpt-5.5               (⚡ cross-provider)
+#
+#   anthropic/claude-haiku-4-5   ──► anthropic/claude-haiku-4-5-20251001
+#   (text-2-sql pipeline only, no cross-provider fallback)
+#
+# ── Failure handling & expected latency overhead ────────────────────────────
+#
+#   429 rate limit  →  0 retries, immediate next hop           ~500 ms
+#   5xx server err  →  1 retry, then next hop                  ~2–4 s
+#   timeout         →  0 retries, immediate next hop           ≤ 10 s + hop
+#   context overflow→  context_window_fallbacks route applies  ~200 ms
+#
+# ═══════════════════════════════════════════════════════════════════════════════
 
 model_list:
 
-  # ── OpenAI ────────────────────────────────────────────────────────────────
-  # Couvre : gpt-4o, gpt-4o-mini, o1, o3, gpt-4.1, etc.
-  - model_name: "openai/*"
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ OPENAI MODELS                                                           │
+  # │                                                                         │
+  # │ gpt-5.5  — primary base model exposed to OpenWebUI                      │
+  # │ gpt-5    — intra-provider fallback (separate TPM bucket from gpt-5.5)   │
+  # │                                                                         │
+  # │ Chain: gpt-5.5 ──► gpt-5 ──► anthropic/claude-sonnet-4-6               │
+  # └─────────────────────────────────────────────────────────────────────────┘
+
+  - model_name: "openai/gpt-5.5"
     litellm_params:
-      model: "openai/*"
+      model: openai/gpt-5.5
       api_key: os.environ/OPENAI_API_KEY
 
-  # ── Anthropic ─────────────────────────────────────────────────────────────
-  # Couvre : claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5, etc.
-  - model_name: "anthropic/*"
+  - model_name: "openai/gpt-5"                  # fallback target only
     litellm_params:
-      model: "anthropic/*"
+      model: openai/gpt-5
+      api_key: os.environ/OPENAI_API_KEY
+
+
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ ANTHROPIC MODELS                                                        │
+  # │                                                                         │
+  # │ claude-sonnet-4-6   — primary base model; also cross-provider Hop 3    │
+  # │                       for the openai/gpt-5.5 chain                     │
+  # │ claude-sonnet-4-5   — intra-provider fallback                           │
+  # │ claude-haiku-4-5    — primary base model (text-2-sql pipeline only)     │
+  # │ claude-haiku-4-5-20251001 — haiku fallback target                       │
+  # │                       ⚠ Verify this model ID against your Anthropic    │
+  # │                         plan before deploying.                          │
+  # │                                                                         │
+  # │ Chain (sonnet): sonnet-4-6 ──► sonnet-4-5 ──► gemini/gemini-3.1-flash  │
+  # │ Chain (haiku):  haiku-4-5  ──► haiku-4-5-20251001                      │
+  # └─────────────────────────────────────────────────────────────────────────┘
+
+  - model_name: "anthropic/claude-sonnet-4-6"
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
 
-  # ── Google AI Studio (Gemini) ─────────────────────────────────────────────
-  # Couvre : gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash, etc.
-  - model_name: "gemini/*"
+  - model_name: "anthropic/claude-sonnet-4-5"   # fallback target only
     litellm_params:
-      model: "gemini/*"
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: "anthropic/claude-haiku-4-5"
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: "anthropic/claude-haiku-4-5-20251001"  # fallback target only
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ GOOGLE MODELS                                                           │
+  # │                                                                         │
+  # │ gemini-3.1-flash      — primary base model exposed to OpenWebUI         │
+  # │ gemini-3.1-flash-lite — intra-provider fallback (lighter, cheaper)      │
+  # │                         also cross-provider Hop 3 target from Anthropic │
+  # │                                                                         │
+  # │ Chain: gemini-3.1-flash ──► gemini-3.1-flash-lite ──► openai/gpt-5.5   │
+  # └─────────────────────────────────────────────────────────────────────────┘
+
+  - model_name: "gemini/gemini-3.1-flash"
+    litellm_params:
+      model: gemini/gemini-3.1-flash
       api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: "gemini/gemini-3.1-flash-lite"  # fallback target only
+    litellm_params:
+      model: gemini/gemini-3.1-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+
+
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ IMAGE GENERATION                                                        │
+  # │                                                                         │
+  # │ gemini-2.5-flash-image (Nano Banana) — #1 on AI Image Arena, 1-3s gen  │
+  # │ No fallback chain: cross-provider image fallback is not meaningful      │
+  # │ (Anthropic has no image gen; OpenAI image format differs).              │
+  # └─────────────────────────────────────────────────────────────────────────┘
+
+  - model_name: "gemini/gemini-2.5-flash-image"
+    litellm_params:
+      model: gemini/gemini-2.5-flash-image
+      api_key: os.environ/GEMINI_API_KEY
+
+
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ SPEECH-TO-TEXT                                                          │
+  # │                                                                         │
+  # │ gpt-4o-transcribe — OpenAI's latest transcription model                │
+  # │ No fallback chain: STT models are not interchangeable across providers. │
+  # └─────────────────────────────────────────────────────────────────────────┘
+
+  - model_name: "openai/gpt-4o-transcribe"
+    litellm_params:
+      model: openai/gpt-4o-transcribe
+      api_key: os.environ/OPENAI_API_KEY
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# ROUTER SETTINGS
+# Synchronized across all 4 nodes via Redis.
+# ───────────────────────────────────────────────────────────────────────────────
+
+router_settings:
+  # latency-based-routing measures response times and prefers the fastest
+  # deployment. With one deployment per model_name (this config), the primary
+  # benefit is circuit-breaker state propagation across nodes through Redis.
+  routing_strategy: latency-based-routing
+
+  # Shared Redis — mandatory with 4 independent LiteLLM instances.
+  redis_host: "10.0.2.171"
+  redis_port: 6379
+  # redis_password: os.environ/REDIS_PASSWORD   # uncomment if Redis auth is on
+
+  # Latency sample TTL (seconds). At ~250 req/day per node the traffic is
+  # sparse; a long TTL prevents measurements from expiring between requests.
+  routing_strategy_args:
+    ttl: 3600
+
+  # Circuit-breaker: after 2 failures within 1 minute the deployment is
+  # removed from rotation for 60 s on ALL nodes (state stored in Redis).
+  allowed_fails: 2
+  cooldown_time: 60
+
+  # Default retry count — overridden per error type by retry_policy below.
+  num_retries: 1
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# LITELLM SETTINGS — Timeouts, per-error retry policy, fallback chains
+# ───────────────────────────────────────────────────────────────────────────────
+
+litellm_settings:
+
+  # Hard timeout per model hop (seconds).
+  # Worst-case user wait for a full 3-hop chain:
+  #   primary times out (10s) + hop2 times out (10s) + hop3 responds ≈ 22s max
+  request_timeout: 10
+
+  # Per-error-type retry policy (overrides num_retries above).
+  #
+  #   429 → 0 retries  Rate limits won't reset in milliseconds; fail fast and
+  #                     let the fallback chain take over immediately.
+  #   5xx → 1 retry    One quick re-attempt for transient server blips.
+  #   timeout → 0      Model is already overloaded; retrying doubles the wait.
+  #   others → 0       Auth and bad-request errors are deterministic and won't
+  #                     self-heal on retry.
+  retry_policy:
+    RateLimitErrorRetries: 0
+    InternalServerErrorRetries: 1
+    TimeoutErrorRetries: 0
+    BadRequestErrorRetries: 0
+    AuthenticationErrorRetries: 0
+    ContentPolicyViolationErrorRetries: 0
+
+  # ── Fallback chains ──────────────────────────────────────────────────────────
+  # Format: { primary_model: [hop_2, hop_3] }
+  # After the primary exhausts its retries (per retry_policy above), LiteLLM
+  # tries each listed hop in order until one succeeds.
+  #
+  # Intermediate hops (gpt-5, sonnet-4-5, flash-lite) each get their own
+  # fallback entry so the cross-provider hop still fires even when the
+  # intermediate model is itself the failing entry point.
+
+  fallbacks:
+
+    # ── OpenAI chain ────────────────────────────────────────────────────────
+    # gpt-5.5 ──► gpt-5 ──► claude-sonnet-4-6
+    - "openai/gpt-5.5":
+        - "openai/gpt-5"
+        - "anthropic/claude-sonnet-4-6"
+
+    # ── Anthropic chain ──────────────────────────────────────────────────────
+    # claude-sonnet-4-6 ──► claude-sonnet-4-5 ──► gemini-3.1-flash
+    - "anthropic/claude-sonnet-4-6":
+        - "anthropic/claude-sonnet-4-5"
+        - "gemini/gemini-3.1-flash"
+
+    # ── Google chain ─────────────────────────────────────────────────────────
+    # gemini-3.1-flash ──► gemini-3.1-flash-lite ──► gpt-5.5
+    - "gemini/gemini-3.1-flash":
+        - "gemini/gemini-3.1-flash-lite"
+        - "openai/gpt-5.5"
+
+    # ── Haiku chain (text-2-sql pipeline only, no cross-provider) ────────────
+    # claude-haiku-4-5 ──► claude-haiku-4-5-20251001
+    - "anthropic/claude-haiku-4-5":
+        - "anthropic/claude-haiku-4-5-20251001"
+
+  # ── Context window fallbacks ─────────────────────────────────────────────────
+  # Fires specifically on context-limit errors, independently of the main
+  # fallback chain. Routes to a model with a larger context window.
+  context_window_fallbacks:
+    - "openai/gpt-5.5":
+        - "openai/gpt-5"
+    - "anthropic/claude-haiku-4-5":
+        - "anthropic/claude-sonnet-4-6"
+    - "gemini/gemini-3.1-flash-lite":
+        - "gemini/gemini-3.1-flash"
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# GENERAL SETTINGS
+# ───────────────────────────────────────────────────────────────────────────────
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
-
-  # En dev : logs verbeux pour déboguer facilement
-  set_verbose: true
+  set_verbose: false  # verbose logging disabled in production
