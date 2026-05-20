@@ -47,6 +47,19 @@ apply-prod: ## Push config and functions to the prod instance
 export: ## Pull current state from the dev instance into local files
 	ENV=development python scripts/export.py
 
+# ── Clean ──────────────────────────────────────────────────────────────────────
+
+.PHONY: clean
+clean: ## Remove local artifacts not tracked by git (.venv, caches, build outputs, test artefacts)
+	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -type f -name '*.py[cod]' -delete
+	find . -type d -name '*.egg-info' -exec rm -rf {} +
+	find . -type d -name '.mypy_cache' -exec rm -rf {} +
+	find . -type d -name '.ruff_cache' -exec rm -rf {} +
+	find . -type d -name '.pytest_cache' -exec rm -rf {} +
+	find . -type d -name '.hypothesis' -exec rm -rf {} +
+	rm -rf .venv dist build .eggs htmlcov .coverage coverage.xml
+
 # ── Commit / Release ───────────────────────────────────────────────────────────
 
 .PHONY: commit

@@ -29,7 +29,7 @@
 #
 #   429 rate limit  →  0 retries, immediate next hop           ~500 ms
 #   5xx server err  →  1 retry, then next hop                  ~2–4 s
-#   timeout         →  0 retries, immediate next hop           ≤ 10 s + hop
+#   TTFT timeout    →  0 retries, immediate next hop           ≤ 10 s + hop
 #   context overflow→  context_window_fallbacks route applies  ~200 ms
 #
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -176,10 +176,15 @@ router_settings:
 
 litellm_settings:
 
-  # Hard timeout per model hop (seconds).
-  # Worst-case user wait for a full 3-hop chain:
-  #   primary times out (10s) + hop2 times out (10s) + hop3 responds ≈ 22s max
-  request_timeout: 10
+  # stream_timeout: max seconds to wait for the first token (TTFT guard).
+  # If a provider hangs and sends nothing, this triggers the fallback chain.
+  # Note: LiteLLM bug #19909 — enforcement is best-effort on some versions.
+  stream_timeout: 10
+
+  # request_timeout: hard cap on total response time (all tokens, not just first).
+  # Set high enough for long generations (essays, summaries, code).
+  # Worst-case 3-hop chain: 300s per hop is the ceiling, not the norm.
+  request_timeout: 300
 
   # Per-error-type retry policy (overrides num_retries above).
   #
