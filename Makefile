@@ -52,7 +52,7 @@ export: ## Pull current state from the dev instance into local files
 .PHONY: clean
 clean: ## Remove local artifacts not tracked by git (.venv, caches, build outputs, test artefacts)
 	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type f -name '*.py[cod]' -delete
+	find . -type f \( -name '*.pyc' -o -name '*.pyo' -o -name '*.pyd' \) -delete
 	find . -type d -name '*.egg-info' -exec rm -rf {} +
 	find . -type d -name '.mypy_cache' -exec rm -rf {} +
 	find . -type d -name '.ruff_cache' -exec rm -rf {} +
