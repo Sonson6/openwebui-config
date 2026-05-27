@@ -1,0 +1,37 @@
+{
+  "_comment": "Fill every empty string with the real ID before running sync_groups_from_csv.py",
+
+  "public_agent_ids": [
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+
+  "bu_groups": {
+    "name_prefix": "BU: ",
+    "channel_name_prefix": "BU: "
+  },
+
+  "alpha_testers": {
+    "group_name": "Alpha Testers",
+    "group_description": "Early-access users with enhanced permissions and exclusive agents.",
+    "channel_name": "Alpha Testers",
+    "channel_description": "Private channel for alpha testers.",
+    "private_agent_ids": [
+      "",
+      "",
+      ""
+    ],
+    "permissions": {
+      "chat": {
+        "stt": true
+      },
+      "features": {
+        "code_interpreter": true,
+        "image_generation": true
+      }
+    }
+  }
+}
