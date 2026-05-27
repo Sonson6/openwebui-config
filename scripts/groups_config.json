@@ -1,5 +1,36 @@
 {
-  "_comment": "Add any number of entries to 'groups'. Fill every empty agent ID string before running.",
+  "_comment": [
+    "Add any number of entries to 'groups'. Fill every empty agent ID string before running.",
+    "",
+    "GROUP KINDS",
+    "  per_value : creates one group per unique value found in 'source_column'.",
+    "              Optional 'filters' narrows the rows considered before the groupby.",
+    "  filtered  : creates one fixed group whose members match ALL entries in 'filters'.",
+    "",
+    "FILTER SYNTAX  — each filter is { 'column': '<col>', 'value': '<val>' }",
+    "  value = 'truthy'        matches '1', 'true', 'yes', 'oui', 'y' (case-insensitive)",
+    "  value = '<literal>'     exact match on the cell value (case-sensitive, trimmed)",
+    "  Multiple filters are AND-ed together.",
+    "",
+    "EXAMPLES",
+    "  One group per BU (all rows):",
+    "    { 'kind': 'per_value', 'source_column': 'BUSINESS_UNIT', 'name_prefix': 'BU: ', ... }",
+    "",
+    "  One group per TEAM, Finance BU only:",
+    "    { 'kind': 'per_value', 'source_column': 'TEAM',",
+    "      'filters': [{ 'column': 'BUSINESS_UNIT', 'value': 'FINANCE' }], 'name_prefix': 'Finance Team: ', ... }",
+    "",
+    "  One fixed group for Finance AND Trading team only:",
+    "    { 'kind': 'filtered',",
+    "      'filters': [{ 'column': 'BUSINESS_UNIT', 'value': 'FINANCE' },",
+    "                  { 'column': 'TEAM', 'value': 'TRADING' }],",
+    "      'name': 'Finance Trading', ... }",
+    "",
+    "  One fixed group for alpha testers (boolean flag column):",
+    "    { 'kind': 'filtered',",
+    "      'filters': [{ 'column': 'ALPHA_TESTER', 'value': 'truthy' }],",
+    "      'name': 'Alpha Testers', ... }"
+  ],
 
   "groups": [
     {
@@ -20,8 +51,7 @@
     {
       "_comment": "One group for every row where ALPHA_TESTER is truthy",
       "kind": "filtered",
-      "source_column": "ALPHA_TESTER",
-      "filter": "truthy",
+      "filters": [{ "column": "ALPHA_TESTER", "value": "truthy" }],
       "name": "Alpha Testers",
       "description": "Early-access users with enhanced permissions and exclusive agents.",
       "channel": true,
@@ -40,6 +70,21 @@
           "image_generation": true
         }
       }
+    },
+    {
+      "_comment": "Example: one fixed group for the Trading team within Finance BU only",
+      "kind": "filtered",
+      "filters": [
+        { "column": "BUSINESS_UNIT", "value": "FINANCE" },
+        { "column": "TEAM", "value": "TRADING" }
+      ],
+      "name": "Finance Trading",
+      "description": "Trading team within the Finance business unit.",
+      "channel": false,
+      "agent_ids": [
+        ""
+      ],
+      "permissions": null
     }
   ]
 }

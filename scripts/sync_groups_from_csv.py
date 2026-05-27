@@ -37,6 +37,19 @@ def load_excel(path: Path) -> pd.DataFrame:
 
 # ── Group resolution ──────────────────────────────────────────────────────────
 
+def apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
+    """AND-chain every {column, value} filter. value='truthy' matches boolean-like strings."""
+    for f in filters:
+        col, val = f["column"], f["value"]
+        if col not in df.columns:
+            sys.exit(f"Filter column '{col}' not found in Excel  (found: {list(df.columns)})")
+        if val == "truthy":
+            df = df[df[col].str.lower().isin(TRUTHY)]
+        else:
+            df = df[df[col].str.strip() == val]
+    return df
+
+
 def resolve_groups(df: pd.DataFrame, group_defs: list[dict]) -> list[dict]:
     """
     Translate group definitions + dataframe into a flat list of concrete group specs.
@@ -46,34 +59,33 @@ def resolve_groups(df: pd.DataFrame, group_defs: list[dict]) -> list[dict]:
     resolved = []
 
     for gdef in group_defs:
-        col = gdef["source_column"]
-        if col not in df.columns:
-            print(f"[WARN] column '{col}' not found in Excel — skipping group definition")
-            continue
+        kind = gdef["kind"]
 
-        if gdef["kind"] == "per_value":
-            prefix   = gdef["name_prefix"]
-            for value, subset in df[df[col].ne("")].groupby(col):
+        if kind == "per_value":
+            col    = gdef["source_column"]
+            prefix = gdef["name_prefix"]
+            subset = apply_filters(df, gdef.get("filters", []))
+            subset = subset[subset[col].ne("")]
+            if col not in df.columns:
+                print(f"[WARN] column '{col}' not found in Excel — skipping")
+                continue
+            for value, group_df in subset.groupby(col):
                 resolved.append({
                     "name":                prefix + value,
                     "description":         f"All members of the {value} {col.lower()}.",
-                    "emails":              set(subset[COL_EMAIL]),
+                    "emails":              set(group_df[COL_EMAIL]),
                     "channel_name":        (prefix + value) if gdef.get("channel") else None,
                     "channel_description": f"Shared channel for {value}.",
                     "agent_ids":           gdef.get("agent_ids", []),
                     "permissions":         gdef.get("permissions"),
                 })
 
-        elif gdef["kind"] == "filtered":
-            f = gdef.get("filter", "")
-            if f == "truthy":
-                mask = df[col].str.lower().isin(TRUTHY)
-            else:
-                mask = df[col].str.strip() == f
+        elif kind == "filtered":
+            filtered_df = apply_filters(df, gdef.get("filters", []))
             resolved.append({
                 "name":                gdef["name"],
                 "description":         gdef.get("description", ""),
-                "emails":              set(df[mask][COL_EMAIL]),
+                "emails":              set(filtered_df[COL_EMAIL]),
                 "channel_name":        gdef.get("channel_name") if gdef.get("channel") else None,
                 "channel_description": gdef.get("channel_description", ""),
                 "agent_ids":           gdef.get("agent_ids", []),
@@ -81,7 +93,7 @@ def resolve_groups(df: pd.DataFrame, group_defs: list[dict]) -> list[dict]:
             })
 
         else:
-            print(f"[WARN] unknown group kind '{gdef['kind']}' — skipping")
+            print(f"[WARN] unknown group kind '{kind}' — skipping")
 
     return resolved
 
