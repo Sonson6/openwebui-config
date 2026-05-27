@@ -1,8 +1,8 @@
 """
 Sync OpenWebUI groups, channels, and model access from an Excel file + groups_config.json.
 
-Excel required columns : Worker, Email - Work, BUSINESS_UNIT
-Excel optional column  : ALPHA_TESTER  (truthy = "true"/"1"/"yes"/"oui"/"y")
+Excel required columns : Email - Work, BUSINESS_UNIT
+Excel optional columns : Worker, ALPHA_TESTER (and any custom column used in groups_config.json)
 
 Run:
   python scripts/sync_groups_from_csv.py users.xlsx
@@ -22,104 +22,117 @@ import owui_groups_api as api
 
 CONFIG_PATH = Path(__file__).parent / "groups_config.json"
 TRUTHY      = {"true", "1", "yes", "oui", "y"}
-
-COL_WORKER = "Worker"
-COL_EMAIL  = "Email - Work"
-COL_BU     = "BUSINESS_UNIT"
-COL_ALPHA  = "ALPHA_TESTER"
+COL_EMAIL   = "Email - Work"
 
 
 # ── Excel ─────────────────────────────────────────────────────────────────────
 
-def parse_excel(path: Path) -> tuple[dict[str, set[str]], set[str]]:
-    """Return ({bu: {email}}, {alpha_email})."""
+def load_excel(path: Path) -> pd.DataFrame:
     df = pd.read_excel(path, dtype=str).fillna("")
-
-    missing = {COL_EMAIL, COL_BU} - set(df.columns)
-    if missing:
-        sys.exit(f"Excel missing columns: {missing}  (found: {list(df.columns)})")
-
+    if COL_EMAIL not in df.columns:
+        sys.exit(f"Excel missing required column: '{COL_EMAIL}'  (found: {list(df.columns)})")
     df[COL_EMAIL] = df[COL_EMAIL].str.strip().str.lower()
-    df[COL_BU]    = df[COL_BU].str.strip()
-    df = df[df[COL_EMAIL].ne("") & df[COL_BU].ne("")]
-
-    bu_emails    = df.groupby(COL_BU)[COL_EMAIL].apply(set).to_dict()
-    alpha_emails = set(df[df[COL_ALPHA].str.lower().isin(TRUTHY)][COL_EMAIL]) if COL_ALPHA in df.columns else set()
-
-    return bu_emails, alpha_emails
+    return df[df[COL_EMAIL].ne("")]
 
 
-# ── Provisioning helpers ──────────────────────────────────────────────────────
+# ── Group resolution ──────────────────────────────────────────────────────────
 
-def resolve_ids(emails: set[str], all_users: dict[str, str], label: str) -> list[str]:
-    ids = []
-    for email in emails:
-        uid = all_users.get(email)
-        if uid:
-            ids.append(uid)
+def resolve_groups(df: pd.DataFrame, group_defs: list[dict]) -> list[dict]:
+    """
+    Translate group definitions + dataframe into a flat list of concrete group specs.
+    Each spec is a plain dict with keys: name, description, emails, channel_name,
+    channel_description, agent_ids, permissions.
+    """
+    resolved = []
+
+    for gdef in group_defs:
+        col = gdef["source_column"]
+        if col not in df.columns:
+            print(f"[WARN] column '{col}' not found in Excel — skipping group definition")
+            continue
+
+        if gdef["kind"] == "per_value":
+            prefix   = gdef["name_prefix"]
+            for value, subset in df[df[col].ne("")].groupby(col):
+                resolved.append({
+                    "name":                prefix + value,
+                    "description":         f"All members of the {value} {col.lower()}.",
+                    "emails":              set(subset[COL_EMAIL]),
+                    "channel_name":        (prefix + value) if gdef.get("channel") else None,
+                    "channel_description": f"Shared channel for {value}.",
+                    "agent_ids":           gdef.get("agent_ids", []),
+                    "permissions":         gdef.get("permissions"),
+                })
+
+        elif gdef["kind"] == "filtered":
+            f = gdef.get("filter", "")
+            if f == "truthy":
+                mask = df[col].str.lower().isin(TRUTHY)
+            else:
+                mask = df[col].str.strip() == f
+            resolved.append({
+                "name":                gdef["name"],
+                "description":         gdef.get("description", ""),
+                "emails":              set(df[mask][COL_EMAIL]),
+                "channel_name":        gdef.get("channel_name") if gdef.get("channel") else None,
+                "channel_description": gdef.get("channel_description", ""),
+                "agent_ids":           gdef.get("agent_ids", []),
+                "permissions":         gdef.get("permissions"),
+            })
+
         else:
-            print(f"  [WARN] no account for '{email}' in '{label}'")
-    return ids
+            print(f"[WARN] unknown group kind '{gdef['kind']}' — skipping")
+
+    return resolved
 
 
-def ensure_group(
-    name: str,
-    description: str,
-    emails: set[str],
-    all_users: dict[str, str],
-    existing_groups: dict[str, dict],
-    permissions: dict | None,
-    dry_run: bool,
-) -> str | None:
-    print(f"\n→ Group '{name}' ({len(emails)} users)")
+# ── Provisioning ──────────────────────────────────────────────────────────────
+
+def provision(spec: dict, all_users: dict, existing_groups: dict, existing_channels: dict, dry_run: bool) -> None:
+    name = spec["name"]
+    print(f"\n→ '{name}'  ({len(spec['emails'])} users)")
+
+    # Group
     if name in existing_groups:
         group_id = existing_groups[name]["id"]
-        print(f"  [EXISTS]       id={group_id}")
+        print(f"  [EXISTS]      id={group_id}")
     else:
-        group_id = api.create_group(name, description, permissions, dry_run)
+        group_id = api.create_group(name, spec["description"], spec["permissions"], dry_run)
 
-    user_ids = resolve_ids(emails, all_users, name)
+    # Members
+    user_ids = [uid for email in spec["emails"] if (uid := all_users.get(email)) or print(f"  [WARN] no account for '{email}'")]
     if group_id and not dry_run:
         already_in = api.fetch_group_member_ids(group_id)
         user_ids = [uid for uid in user_ids if uid not in already_in]
     api.add_users_to_group(group_id, user_ids, name, dry_run)
-    return group_id
 
+    # Channel
+    if spec["channel_name"]:
+        ch = spec["channel_name"]
+        if ch in existing_channels:
+            print(f"  [EXISTS CHAN] '{ch}'")
+        else:
+            api.create_channel(ch, spec["channel_description"], group_id, dry_run)
 
-def ensure_channel(
-    name: str,
-    description: str,
-    group_id: str | None,
-    existing_channels: dict[str, dict],
-    dry_run: bool,
-) -> None:
-    if name in existing_channels:
-        print(f"  [EXISTS CHAN]  '{name}'")
-        return
-    api.create_channel(name, description, group_id, dry_run)
-
-
-def grant_agents(agent_ids: list[str], group_id: str | None, dry_run: bool) -> None:
-    for model_id in agent_ids:
+    # Agents
+    for model_id in spec["agent_ids"]:
         if model_id and group_id:
             api.grant_model_access_to_group(model_id, group_id, dry_run)
         elif not model_id:
-            print("  [SKIP MODEL]   empty ID in config — fill groups_config.json")
+            print("  [SKIP MODEL]  empty ID in config — fill groups_config.json")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def sync(xlsx_path: Path, dry_run: bool) -> None:
     cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    bu_cfg    = cfg["bu_groups"]
-    alpha_cfg = cfg["alpha_testers"]
-    public_ids  = cfg["public_agent_ids"]
-    private_ids = alpha_cfg["private_agent_ids"]
 
     print(f"Reading {xlsx_path}")
-    bu_emails, alpha_emails = parse_excel(xlsx_path)
-    n_users = sum(len(v) for v in bu_emails.values())
-    print(f"  {n_users} rows | {len(bu_emails)} BUs | {len(alpha_emails)} alpha tester(s)")
+    df = load_excel(xlsx_path)
+    print(f"  {len(df)} rows loaded")
+
+    group_specs = resolve_groups(df, cfg["groups"])
+    print(f"  {len(group_specs)} groups to provision")
 
     print("\nFetching OpenWebUI state…")
     all_users         = api.fetch_all_users()
@@ -127,43 +140,9 @@ def sync(xlsx_path: Path, dry_run: bool) -> None:
     existing_channels = api.fetch_existing_channels()
     print(f"  {len(all_users)} users, {len(existing_groups)} groups, {len(existing_channels)} channels")
 
-    # ── BU groups ─────────────────────────────────────────────────────────────
-    print("\n── Business Units " + "─" * 56)
-    for bu, emails in sorted(bu_emails.items()):
-        group_name   = bu_cfg["name_prefix"] + bu
-        channel_name = bu_cfg["channel_name_prefix"] + bu
-
-        group_id = ensure_group(
-            name=group_name,
-            description=f"All members of the {bu} business unit.",
-            emails=emails,
-            all_users=all_users,
-            existing_groups=existing_groups,
-            permissions=None,
-            dry_run=dry_run,
-        )
-        ensure_channel(channel_name, f"Shared channel for {bu}.", group_id, existing_channels, dry_run)
-        grant_agents(public_ids, group_id, dry_run)
-
-    # ── Alpha Testers ─────────────────────────────────────────────────────────
-    print("\n── Alpha Testers " + "─" * 57)
-    alpha_group_id = ensure_group(
-        name=alpha_cfg["group_name"],
-        description=alpha_cfg["group_description"],
-        emails=alpha_emails,
-        all_users=all_users,
-        existing_groups=existing_groups,
-        permissions=alpha_cfg["permissions"],
-        dry_run=dry_run,
-    )
-    ensure_channel(
-        alpha_cfg["channel_name"],
-        alpha_cfg["channel_description"],
-        alpha_group_id,
-        existing_channels,
-        dry_run,
-    )
-    grant_agents(public_ids + private_ids, alpha_group_id, dry_run)
+    print()
+    for spec in group_specs:
+        provision(spec, all_users, existing_groups, existing_channels, dry_run)
 
     print("\nDone." if not dry_run else "\nDry-run complete — no changes made.")
 

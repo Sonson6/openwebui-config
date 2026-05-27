@@ -1,37 +1,45 @@
 {
-  "_comment": "Fill every empty string with the real ID before running sync_groups_from_csv.py",
+  "_comment": "Add any number of entries to 'groups'. Fill every empty agent ID string before running.",
 
-  "public_agent_ids": [
-    "",
-    "",
-    "",
-    "",
-    ""
-  ],
-
-  "bu_groups": {
-    "name_prefix": "BU: ",
-    "channel_name_prefix": "BU: "
-  },
-
-  "alpha_testers": {
-    "group_name": "Alpha Testers",
-    "group_description": "Early-access users with enhanced permissions and exclusive agents.",
-    "channel_name": "Alpha Testers",
-    "channel_description": "Private channel for alpha testers.",
-    "private_agent_ids": [
-      "",
-      "",
-      ""
-    ],
-    "permissions": {
-      "chat": {
-        "stt": true
-      },
-      "features": {
-        "code_interpreter": true,
-        "image_generation": true
+  "groups": [
+    {
+      "_comment": "One group + channel per unique BUSINESS_UNIT value in the Excel",
+      "kind": "per_value",
+      "source_column": "BUSINESS_UNIT",
+      "name_prefix": "BU: ",
+      "channel": true,
+      "agent_ids": [
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "permissions": null
+    },
+    {
+      "_comment": "One group for every row where ALPHA_TESTER is truthy",
+      "kind": "filtered",
+      "source_column": "ALPHA_TESTER",
+      "filter": "truthy",
+      "name": "Alpha Testers",
+      "description": "Early-access users with enhanced permissions and exclusive agents.",
+      "channel": true,
+      "channel_name": "Alpha Testers",
+      "channel_description": "Private channel for alpha testers.",
+      "agent_ids": [
+        "", "", "", "", "",
+        "", "", ""
+      ],
+      "permissions": {
+        "chat": {
+          "stt": true
+        },
+        "features": {
+          "code_interpreter": true,
+          "image_generation": true
+        }
       }
     }
-  }
+  ]
 }
