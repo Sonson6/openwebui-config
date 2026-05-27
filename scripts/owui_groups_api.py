@@ -16,7 +16,7 @@ def fetch_all_users() -> dict[str, str]:
     """Return {email: user_id}."""
     resp = client.get("/api/v1/users/all")
     resp.raise_for_status()
-    return {u["email"]: u["id"] for u in resp.json()}
+    return {u["email"]: u["id"] for u in resp.json()["users"]}
 
 
 def fetch_existing_groups() -> dict[str, dict]:
@@ -102,8 +102,7 @@ def grant_model_access_to_group(model_id: str, group_id: str, dry_run: bool) -> 
         return
     resp = client.get(f"/api/v1/models/model?id={model_id}")
     resp.raise_for_status()
-    model = resp.json()
-    existing = model.get("access_grants") or []
+    existing = resp.json().get("access_grants") or []
     already = any(
         g.get("principal_type") == "group"
         and g.get("principal_id") == group_id
@@ -114,9 +113,12 @@ def grant_model_access_to_group(model_id: str, group_id: str, dry_run: bool) -> 
         print("  [SKIP]         grant already exists")
         return
     resp = client.post(
-        "/api/v1/models/model/update",
-        json={**model, "access_grants": existing + [
-            {"principal_type": "group", "principal_id": group_id, "permission": "read"}
-        ]},
+        "/api/v1/models/model/access/update",
+        json={
+            "id": model_id,
+            "access_grants": existing + [
+                {"principal_type": "group", "principal_id": group_id, "permission": "read"}
+            ],
+        },
     )
     resp.raise_for_status()

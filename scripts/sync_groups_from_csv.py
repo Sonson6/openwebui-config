@@ -1,20 +1,21 @@
 """
-Sync OpenWebUI groups, channels, and model access from a CSV + groups_config.json.
+Sync OpenWebUI groups, channels, and model access from an Excel file + groups_config.json.
 
-CSV required columns  : email, business_unit
-CSV optional column   : alpha_tester  (truthy = "true"/"1"/"yes"/"oui"/"y")
+Excel required columns : Worker, Email - Work, BUSINESS_UNIT
+Excel optional column  : ALPHA_TESTER  (truthy = "true"/"1"/"yes"/"oui"/"y")
 
 Run:
-  python scripts/sync_groups_from_csv.py users.csv
-  python scripts/sync_groups_from_csv.py users.csv --dry-run
-  ENV=production python scripts/sync_groups_from_csv.py users.csv
+  python scripts/sync_groups_from_csv.py users.xlsx
+  python scripts/sync_groups_from_csv.py users.xlsx --dry-run
+  ENV=production python scripts/sync_groups_from_csv.py users.xlsx
 """
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
+
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 import owui_groups_api as api
@@ -22,31 +23,28 @@ import owui_groups_api as api
 CONFIG_PATH = Path(__file__).parent / "groups_config.json"
 TRUTHY      = {"true", "1", "yes", "oui", "y"}
 
-COL_EMAIL = "email"
-COL_BU    = "business_unit"
-COL_ALPHA = "alpha_tester"
+COL_WORKER = "Worker"
+COL_EMAIL  = "Email - Work"
+COL_BU     = "BUSINESS_UNIT"
+COL_ALPHA  = "ALPHA_TESTER"
 
 
-# ── CSV ───────────────────────────────────────────────────────────────────────
+# ── Excel ─────────────────────────────────────────────────────────────────────
 
-def parse_csv(path: Path) -> tuple[dict[str, set[str]], set[str]]:
+def parse_excel(path: Path) -> tuple[dict[str, set[str]], set[str]]:
     """Return ({bu: {email}}, {alpha_email})."""
-    rows = list(csv.DictReader(path.open(encoding="utf-8")))
-    if not rows:
-        sys.exit("CSV is empty.")
-    missing = {COL_EMAIL, COL_BU} - set(rows[0].keys())
-    if missing:
-        sys.exit(f"CSV missing columns: {missing}")
+    df = pd.read_excel(path, dtype=str).fillna("")
 
-    bu_emails: dict[str, set[str]] = {}
-    alpha_emails: set[str] = set()
-    for row in rows:
-        email = row[COL_EMAIL].strip().lower()
-        bu    = row[COL_BU].strip()
-        if bu:
-            bu_emails.setdefault(bu, set()).add(email)
-        if row.get(COL_ALPHA, "").strip().lower() in TRUTHY:
-            alpha_emails.add(email)
+    missing = {COL_EMAIL, COL_BU} - set(df.columns)
+    if missing:
+        sys.exit(f"Excel missing columns: {missing}  (found: {list(df.columns)})")
+
+    df[COL_EMAIL] = df[COL_EMAIL].str.strip().str.lower()
+    df[COL_BU]    = df[COL_BU].str.strip()
+    df = df[df[COL_EMAIL].ne("") & df[COL_BU].ne("")]
+
+    bu_emails    = df.groupby(COL_BU)[COL_EMAIL].apply(set).to_dict()
+    alpha_emails = set(df[df[COL_ALPHA].str.lower().isin(TRUTHY)][COL_EMAIL]) if COL_ALPHA in df.columns else set()
 
     return bu_emails, alpha_emails
 
@@ -111,15 +109,15 @@ def grant_agents(agent_ids: list[str], group_id: str | None, dry_run: bool) -> N
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def sync(csv_path: Path, dry_run: bool) -> None:
+def sync(xlsx_path: Path, dry_run: bool) -> None:
     cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     bu_cfg    = cfg["bu_groups"]
     alpha_cfg = cfg["alpha_testers"]
     public_ids  = cfg["public_agent_ids"]
     private_ids = alpha_cfg["private_agent_ids"]
 
-    print(f"Reading {csv_path}")
-    bu_emails, alpha_emails = parse_csv(csv_path)
+    print(f"Reading {xlsx_path}")
+    bu_emails, alpha_emails = parse_excel(xlsx_path)
     n_users = sum(len(v) for v in bu_emails.values())
     print(f"  {n_users} rows | {len(bu_emails)} BUs | {len(alpha_emails)} alpha tester(s)")
 
@@ -172,9 +170,9 @@ def sync(csv_path: Path, dry_run: bool) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("csv", type=Path)
+    parser.add_argument("xlsx", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if not args.csv.exists():
-        sys.exit(f"Not found: {args.csv}")
-    sync(args.csv, dry_run=args.dry_run)
+    if not args.xlsx.exists():
+        sys.exit(f"Not found: {args.xlsx}")
+    sync(args.xlsx, dry_run=args.dry_run)
