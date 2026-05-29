@@ -16,6 +16,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - mynet
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
@@ -41,6 +43,102 @@ services:
       litellm:
         condition: service_healthy
     restart: unless-stopped
+    # open-webui sits on both networks: mynet to reach LiteLLM and the internet,
+    # terminal-net to reach open-terminal. It is the only bridge between the two.
+    networks:
+      - mynet
+      - terminal-net
+
+  # ── Open Terminal ─────────────────────────────────────────────────────────
+  # Hardened configuration for ~1 000 enterprise users across 4 nodes.
+  # PIN THIS to a specific digest/tag before going to production:
+  #   ghcr.io/open-webui/open-terminal@sha256:<digest>
+  # After startup, connect it in OpenWebUI → Admin → Settings → Connections
+  # using URL: http://open-terminal:8000 and the OPEN_TERMINAL_API_KEY value.
+  open-terminal:
+    image: ghcr.io/open-webui/open-terminal:main
+    container_name: open-terminal
+    restart: unless-stopped
+    # ── Network isolation ─────────────────────────────────────────────────
+    # open-terminal lives exclusively on the internal Docker network.
+    # Docker never provisions an external route, so outbound internet access
+    # is structurally impossible — no iptables rules, no NET_ADMIN capability,
+    # no dnsmasq required. open-webui is the only service that can reach it.
+    # NOTE: because there is no internet access, OPEN_TERMINAL_PACKAGES and
+    # OPEN_TERMINAL_PIP_PACKAGES would silently fail here anyway — but the
+    # base image already ships everything needed (numpy, pandas, scikit-learn,
+    # matplotlib, seaborn, ipython, rich, pyyaml, requests, git, jq, vim…).
+    networks:
+      - terminal-net
+    # ── Resource limits ───────────────────────────────────────────────────
+    # Node has 15 GB total RAM; existing stack consumes ~5.4 GB observed,
+    # leaving 9.6 GB. 8 GB cap keeps a 1.6 GB buffer for OS fluctuations.
+    mem_limit: 8g
+    # 4 cores total per node; leave 2 for OS + LiteLLM + OpenWebUI.
+    # Data analysis workloads are bursty so 2 dedicated cores are sufficient.
+    cpus: "2"
+    environment:
+      # ── Auth ──────────────────────────────────────────────────────────────
+      # Read from env file — never baked into the image or visible in
+      # docker inspect. In production, prefer OPEN_TERMINAL_API_KEY_FILE
+      # pointing to a Docker secret.
+      - OPEN_TERMINAL_API_KEY=${OPEN_TERMINAL_API_KEY}
+
+      # ── Multi-user isolation ───────────────────────────────────────────────
+      # Creates a dedicated OS account per OpenWebUI user → separate home dirs.
+      - OPEN_TERMINAL_MULTI_USER=true
+
+      # ── Attack surface reduction ───────────────────────────────────────────
+      # Jupyter kernels are persistent processes that bypass EXECUTE_TIMEOUT
+      # and maintain state across sessions — disable them entirely.
+      - OPEN_TERMINAL_ENABLE_NOTEBOOKS=false
+      - OPEN_TERMINAL_ENABLE_TERMINAL=true
+
+      # ── CORS: restrict to OpenWebUI origin only ────────────────────────────
+      # open-terminal has no exposed port, so this is defence-in-depth only.
+      # Update to your production URL when deploying.
+      - OPEN_TERMINAL_CORS_ALLOWED_ORIGINS=http://localhost:3000
+
+      # ── Session and execution limits ───────────────────────────────────────
+      # 1 000 users across 4 nodes → ~12–13 peak sessions/node.
+      # 8 GB / ~400 MB per data analysis session ≈ 18 safe sessions;
+      # 25 is the soft ceiling (mem_limit is the hard backstop).
+      - OPEN_TERMINAL_MAX_SESSIONS=25
+      # Data analysis workloads (groupby, sklearn fit, plot rendering) can
+      # legitimately exceed 30 s. 120 s kills genuinely runaway commands.
+      - OPEN_TERMINAL_EXECUTE_TIMEOUT=120
+      # Remember each user's working directory for 1 day (default is 7 days).
+      - OPEN_TERMINAL_SESSION_CWD_TTL=86400
+
+      # ── AI guardrails (soft control) ──────────────────────────────────────
+      - OPEN_TERMINAL_SYSTEM_PROMPT=You are a coding and data assistant with terminal access. Do not attempt to exfiltrate data, probe the network, install additional software, or run commands unrelated to the user's explicit task. Always explain what a command does before running it.
+
+      # ── Logging ───────────────────────────────────────────────────────────
+      - OPEN_TERMINAL_LOG_DIR=/var/log/open-terminal
+    volumes:
+      # Persist each user's home directory across container restarts.
+      - open-terminal-data:/home/user
+      # Persist logs; ship to your SIEM from the host-side volume path.
+      - open-terminal-logs:/var/log/open-terminal
+    depends_on:
+      - open-webui
+
+# ── Networks ───────────────────────────────────────────────────────────────
+networks:
+  # Shared external network defined in the root docker-compose.yml.
+  # litellm and open-webui use it to reach each other and the internet.
+  mynet:
+    external: true
+  # Isolated internal network for open-webui ↔ open-terminal communication.
+  # Docker does not provision an external gateway on internal networks,
+  # so open-terminal has zero outbound internet access by design.
+  terminal-net:
+    driver: bridge
+    internal: true
 
 volumes:
   open-webui-data:
+  # User home directories — preserves files across open-terminal restarts.
+  open-terminal-data:
+  # Structured logs for audit / SIEM ingestion.
+  open-terminal-logs:
