@@ -14,6 +14,14 @@ Before calling `create_or_edit_presentation`, gather the following from the user
 
 Then pass all of this as a single detailed prompt to the tool.
 
+## Token budget
+
+The pptx skill's visual QA loop (slide → image → verify → fix → repeat) is extremely expensive.
+**Skip it unless the user explicitly asks for a quality review.**
+Include this instruction at the end of every prompt passed to the tool:
+
+> Skip thumbnail generation and visual QA. Generate the file and return it directly.
+
 ## Multi-turn editing
 
 If the user wants to edit a presentation built earlier **in the same conversation**, call the tool again describing only the change — the container is reused automatically:

@@ -17,6 +17,14 @@ _BETAS = ["code-execution-2025-08-25", "skills-2025-10-02", "files-api-2025-04-1
 _PPTX_SKILL = {"type": "anthropic", "skill_id": "pptx", "version": "latest"}
 _CODE_EXEC_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
 _CONTAINER_FILE = "container_id.txt"
+_NO_QA_SUFFIX = "\n\nSkip thumbnail generation and visual QA. Generate the file and return it directly."
+_NO_QA_SYSTEM = (
+    "You are generating a PowerPoint file under a strict token budget. "
+    "Do NOT render slides to images, do NOT generate thumbnails, and do NOT "
+    "perform visual quality-assurance loops. Write the pptxgenjs script once, "
+    "execute it once to produce the .pptx file, and stop. Do not re-render or "
+    "self-review the output visually."
+)
 
 
 class Tools:
@@ -31,6 +39,18 @@ class Tools:
             description="Claude model ID (claude-sonnet-4-6 or claude-opus-4-7)",
         )
         MAX_TOKENS: int = Field(default=16000, description="Max output tokens per call")
+        SKIP_VISUAL_QA: bool = Field(
+            default=True,
+            description="Append an instruction to skip thumbnail generation and visual QA. Saves ~80-90% of tokens. Disable only when quality verification is needed.",
+        )
+        TOKEN_BUDGET: int = Field(
+            default=300000,
+            description="HARD CAP. The loop aborts once cumulative input+output tokens exceed this. Prevents runaway cost. ~300k ≈ <$1 on Sonnet.",
+        )
+        MAX_API_ROUNDS: int = Field(
+            default=3,
+            description="Max number of API round-trips (pause_turn continuations). Each round re-sends accumulated context, so keep this low.",
+        )
 
     def __init__(self) -> None:
         self.valves = self.Valves()
@@ -53,16 +73,30 @@ class Tools:
         (session_dir / _CONTAINER_FILE).write_text(container_id)
 
     def _extract_file_ids(self, response) -> list[str]:
-        file_ids = []
-        for block in response.content:
-            # tool_result blocks wrap bash_code_execution_result
-            if getattr(block, "type", None) == "tool_result":
-                inner = getattr(block, "content", None)
-                if inner and getattr(inner, "type", None) == "bash_code_execution_result":
-                    for item in getattr(inner, "content", None) or []:
-                        if getattr(item, "type", None) == "file":
-                            file_ids.append(item.file_id)
-        return file_ids
+        """Walk the response for file_ids. Tolerant of block-type naming
+        ('bash_code_execution_tool_result', 'code_execution_tool_result',
+        'tool_result') so a naming change never silently drops the file and
+        forces an expensive re-run."""
+        file_ids: list[str] = []
+
+        def collect(node) -> None:
+            if node is None:
+                return
+            if isinstance(node, list):
+                for n in node:
+                    collect(n)
+                return
+            fid = getattr(node, "file_id", None)
+            if fid:
+                file_ids.append(fid)
+            inner = getattr(node, "content", None)
+            if inner is not None and not isinstance(inner, str):
+                collect(inner)
+
+        collect(response.content)
+        # Dedupe, preserve order
+        seen: set[str] = set()
+        return [f for f in file_ids if not (f in seen or seen.add(f))]
 
     async def _emit(
         self,
@@ -104,14 +138,16 @@ class Tools:
             container_config["id"] = container_id
 
         client = anthropic.Anthropic(api_key=self.valves.ANTHROPIC_API_KEY)
-        messages: list[dict] = [{"role": "user", "content": prompt}]
+        effective_prompt = prompt + (_NO_QA_SUFFIX if self.valves.SKIP_VISUAL_QA else "")
+        messages: list[dict] = [{"role": "user", "content": effective_prompt}]
 
         await self._emit(__event_emitter__, "Calling Claude pptx skill…")
 
-        # pause_turn loop — usually completes in one iteration
+        # pause_turn loop — bounded by MAX_API_ROUNDS and a hard TOKEN_BUDGET.
         response = None
-        for step in range(10):
-            response = client.beta.messages.create(
+        total_tokens = 0
+        for round_i in range(max(1, self.valves.MAX_API_ROUNDS)):
+            create_kwargs: dict = dict(
                 model=self.valves.MODEL,
                 max_tokens=self.valves.MAX_TOKENS,
                 betas=_BETAS,
@@ -119,6 +155,15 @@ class Tools:
                 messages=messages,
                 tools=[_CODE_EXEC_TOOL],
             )
+            if self.valves.SKIP_VISUAL_QA:
+                create_kwargs["system"] = _NO_QA_SYSTEM
+            response = client.beta.messages.create(**create_kwargs)
+
+            usage = getattr(response, "usage", None)
+            if usage:
+                total_tokens += (getattr(usage, "input_tokens", 0) or 0) + (
+                    getattr(usage, "output_tokens", 0) or 0
+                )
 
             # Persist container ID after first response
             if hasattr(response, "container") and response.container and response.container.id:
@@ -128,11 +173,35 @@ class Tools:
             if response.stop_reason != "pause_turn":
                 break
 
-            await self._emit(__event_emitter__, f"Generating… (step {step + 2})")
+            # HARD KILL-SWITCH: stop before paying for another expensive round.
+            if total_tokens >= self.valves.TOKEN_BUDGET:
+                await self._emit(__event_emitter__, "Token budget exceeded — aborting.", done=True)
+                return (
+                    f"Aborted: token budget of {self.valves.TOKEN_BUDGET:,} exceeded "
+                    f"({total_tokens:,} tokens used) before the presentation finished.\n"
+                    f"No file was saved. Simplify the request, keep SKIP_VISUAL_QA on, "
+                    f"or raise the TOKEN_BUDGET valve if you accept the cost.\n"
+                    f"Session dir: {session_dir}"
+                )
+
+            await self._emit(
+                __event_emitter__,
+                f"Generating… (round {round_i + 2}, {total_tokens:,} tokens so far)",
+            )
             messages.append({"role": "assistant", "content": response.content})
 
         if response is None:
             return "Error: no response received from the API."
+
+        # Loop ended while still paused = ran out of rounds before finishing.
+        if response.stop_reason == "pause_turn":
+            await self._emit(__event_emitter__, "Round limit reached — aborting.", done=True)
+            return (
+                f"Aborted: hit the {self.valves.MAX_API_ROUNDS}-round limit "
+                f"({total_tokens:,} tokens used) before the presentation finished.\n"
+                f"No file was saved. Raise MAX_API_ROUNDS / TOKEN_BUDGET or simplify the request.\n"
+                f"Session dir: {session_dir}"
+            )
 
         # Download generated files
         file_ids = self._extract_file_ids(response)
@@ -154,11 +223,14 @@ class Tools:
                 f.write(content.read())
             saved.append(str(dest))
 
-        await self._emit(__event_emitter__, "Done!", done=True)
+        await self._emit(
+            __event_emitter__, f"Done! ({total_tokens:,} tokens used)", done=True
+        )
 
         files_str = "\n".join(f"  {p}" for p in saved)
         return (
             f"Presentation saved to:\n{files_str}\n\n"
+            f"Tokens used: {total_tokens:,}\n"
             f"Session directory: {session_dir}\n"
             f"(Container ID persisted — you can ask me to edit this presentation in the same conversation)"
         )

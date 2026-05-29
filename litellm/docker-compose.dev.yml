@@ -56,7 +56,9 @@ services:
   # After startup, connect it in OpenWebUI → Admin → Settings → Connections
   # using URL: http://open-terminal:8000 and the OPEN_TERMINAL_API_KEY value.
   open-terminal:
-    image: ghcr.io/open-webui/open-terminal:main
+    build:
+      context: .
+      dockerfile: Dockerfile.open-terminal
     container_name: open-terminal
     restart: unless-stopped
     # ── Network isolation ─────────────────────────────────────────────────
@@ -125,10 +127,12 @@ services:
 
 # ── Networks ───────────────────────────────────────────────────────────────
 networks:
-  # Shared external network defined in the root docker-compose.yml.
-  # litellm and open-webui use it to reach each other and the internet.
+  # Standard bridge network for inter-service communication and internet access.
+  # In production this network is shared across compose files and has a fixed
+  # IPAM subnet (100.18.17.0/24) to avoid conflicts with the corporate VPN.
+  # In dev it is defined locally — no IPAM needed.
   mynet:
-    external: true
+    driver: bridge
   # Isolated internal network for open-webui ↔ open-terminal communication.
   # Docker does not provision an external gateway on internal networks,
   # so open-terminal has zero outbound internet access by design.
