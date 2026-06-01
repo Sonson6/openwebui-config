@@ -1,3 +1,4 @@
-FROM ghcr.io/open-webui/open-terminal:main
+FROM ghcr.io/open-webui/open-terminal
 
-RUN pip install --no-cache-dir duckdb
+USER root
+RUN pip install --no-cache-dir duckdb tabulate
