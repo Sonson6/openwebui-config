@@ -119,9 +119,9 @@ services:
       - OPEN_TERMINAL_LOG_DIR=/var/log/open-terminal
     volumes:
       # Persist each user's home directory across container restarts.
-      # In multi-user mode each user gets /home/<username> — mount /home
-      # to cover all accounts rather than the unused /home/user path.
-      - open-terminal-data:/home
+      # open-terminal runs as a single OS user named "user" at /home/user —
+      # multi-user isolation is handled at the application level, not OS level.
+      - open-terminal-data:/home/user
       # Persist logs; ship to your SIEM from the host-side volume path.
       - open-terminal-logs:/var/log/open-terminal
     depends_on:
