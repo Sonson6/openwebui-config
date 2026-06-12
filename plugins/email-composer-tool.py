@@ -377,11 +377,11 @@ body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI
     var to=chips.to.join(', '),cc=chips.cc.join(', '),bcc=chips.bcc.join(', ');
     var sub=subjectIn.value,htmlBody=bodyEl.innerHTML;
     var boundary='----=_Part_'+Date.now();
-    var eml='MIME-Version: 1.0\r\nDate: '+new Date().toUTCString()+'\r\nTo: '+to+'\r\n';
+    var eml='MIME-Version: 1.0\r\nX-Unsent: 1\r\nDate: '+new Date().toUTCString()+'\r\nTo: '+to+'\r\n';
     if(cc)eml+='Cc: '+cc+'\r\n';
     if(bcc)eml+='Bcc: '+bcc+'\r\n';
     eml+='Subject: '+sub+'\r\n';
-    eml+='Content-Type: text/html; charset=utf-8\r\n\r\n';
+    eml+='Content-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n';
     eml+='<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;font-size:14px;line-height:1.6;color:#222">'+htmlBody+'</body></html>';
     var blob=new Blob([eml],{type:'message/rfc822'}),url=URL.createObjectURL(blob);
     var a=document.createElement('a');a.href=url;a.download=(sub||'email').replace(/[^a-zA-Z0-9 _-]/g,'_')+'.eml';
