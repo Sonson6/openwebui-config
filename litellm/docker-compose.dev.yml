@@ -19,6 +19,44 @@ services:
     networks:
       - mynet
 
+  # ── GPT-Vis Render (self-hosted chart rendering backend) ────────────────────
+  # Local replacement for AntV's hosted https://antv-studio.alipay.com/api/gpt-vis
+  # endpoint. Implements the VIS_REQUEST_SERVER contract using @antv/gpt-vis-ssr
+  # (pinned to 0.3.8 — the last version published before the 0.4.7/0.5.7 @antv
+  # supply-chain compromise). No chart data ever leaves this stack.
+  gpt-vis-render:
+    build:
+      context: ./gpt-vis-render
+    container_name: gpt-vis-render
+    restart: unless-stopped
+    environment:
+      # Must be reachable from the user's browser (not just other containers),
+      # since open-webui renders <img src="..."> pointing at this URL.
+      - PUBLIC_BASE_URL=${GPT_VIS_PUBLIC_URL:-http://localhost:3001}
+    ports:
+      - "3001:3000"
+    volumes:
+      - gpt-vis-charts:/charts
+    networks:
+      - mynet
+
+  # ── MCP Chart (data visualization tool server) ──────────────────────────────
+  # Wraps @antv/mcp-server-chart via mcpo, exposing it as an OpenAPI tool server
+  # that open-webui can register under Admin → Settings → Tools.
+  mcp-chart:
+    image: ghcr.io/open-webui/mcpo:main
+    container_name: mcp-chart
+    command: ["--api-key", "${MCP_CHART_API_KEY}", "--", "npx", "-y", "@antv/mcp-server-chart"]
+    environment:
+      # Routes chart rendering to our local gpt-vis-render container instead of
+      # AntV's hosted gpt-vis service.
+      - VIS_REQUEST_SERVER=http://gpt-vis-render:3000/
+    depends_on:
+      - gpt-vis-render
+    restart: unless-stopped
+    networks:
+      - mynet
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     ports:
@@ -39,9 +77,16 @@ services:
       - AUDIO_STT_OPENAI_API_BASE_URL=http://litellm:4000/v1
       - AUDIO_STT_OPENAI_API_KEY=${LITELLM_MASTER_KEY}
       - AUDIO_STT_MODEL=gpt-4o-transcribe
+      # Registers the mcp-chart tool server on first boot (seeds the DB config).
+      # NOTE: only takes effect on a fresh database — once Open WebUI has
+      # persisted tool server connections, edits here are ignored and the
+      # connection must be managed via Admin → Settings → External Tools.
+      - 'TOOL_SERVER_CONNECTIONS=[{"type":"openapi","url":"http://mcp-chart:8000","spec_type":"url","spec":"","path":"openapi.json","auth_type":"bearer","key":"${MCP_CHART_API_KEY}","config":{"enable":true},"info":{"id":"mcp-chart","name":"MCP Chart","description":"AntV chart generation tools"}}]'
     depends_on:
       litellm:
         condition: service_healthy
+      mcp-chart:
+        condition: service_started
     restart: unless-stopped
     # open-webui sits on both networks: mynet to reach LiteLLM and the internet,
     # terminal-net to reach open-terminal. It is the only bridge between the two.
@@ -148,3 +193,5 @@ volumes:
   open-terminal-data:
   # Structured logs for audit / SIEM ingestion.
   open-terminal-logs:
+  # Rendered chart PNGs served by gpt-vis-render.
+  gpt-vis-charts:

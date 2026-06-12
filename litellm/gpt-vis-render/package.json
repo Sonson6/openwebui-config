@@ -1,0 +1,14 @@
+{
+  "name": "gpt-vis-render",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@antv/gpt-vis-ssr": "0.3.8",
+    "express": "^4.21.2"
+  }
+}

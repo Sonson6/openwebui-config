@@ -75,21 +75,51 @@ model_list:
     litellm_params:
       model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
+      # Prompt caching: cache the (large, static) agent system prompt and the
+      # growing conversation prefix up to the latest user turn. Cache hits are
+      # ~90% cheaper; min cacheable block is 1024 tokens, TTL is 5 min.
+      cache_control_injection_points:
+        - location: message
+          role: system
+        - location: message
+          role: user
+          index: -1
 
   - model_name: "anthropic/claude-sonnet-4-5"   # fallback target only
     litellm_params:
       model: anthropic/claude-sonnet-4-5
       api_key: os.environ/ANTHROPIC_API_KEY
+      cache_control_injection_points:
+        - location: message
+          role: system
+        - location: message
+          role: user
+          index: -1
 
   - model_name: "anthropic/claude-haiku-4-5"
     litellm_params:
       model: anthropic/claude-haiku-4-5
       api_key: os.environ/ANTHROPIC_API_KEY
+      # Note: Haiku requires a larger min cacheable block (2048 tokens) than
+      # Sonnet/Opus (1024). Verify the text-2-sql system prompt clears that
+      # bar, otherwise this injection point is a no-op.
+      cache_control_injection_points:
+        - location: message
+          role: system
+        - location: message
+          role: user
+          index: -1
 
   - model_name: "anthropic/claude-haiku-4-5-20251001"  # fallback target only
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: os.environ/ANTHROPIC_API_KEY
+      cache_control_injection_points:
+        - location: message
+          role: system
+        - location: message
+          role: user
+          index: -1
 
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
