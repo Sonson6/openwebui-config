@@ -1454,11 +1454,18 @@ function _ivDownload() {
 // ---------------------------------------------------------------------------
 // Download as a PNG image
 // ---------------------------------------------------------------------------
-// Rasterizes the rendered content with html2canvas, lazy-loaded from the
-// CDN that the iframe CSP already allowlists (loaded only on first PNG
+// Rasterizes the rendered content with html2canvas-pro, lazy-loaded from
+// the CDN that the iframe CSP already allowlists (loaded only on first PNG
 // click, so the HTML path stays dependency-free). Captures #iv-render so
 // the floating toolbar and loader are never in the shot; falls back to
 // <body> only if that container is somehow missing.
+//
+// html2canvas-pro (not the original html2canvas) is required: charts often
+// use modern CSS color syntax (oklch/oklab/lab/color() and rgb()/hsl() with
+// the "/ alpha" shorthand). The original html2canvas can't parse those and
+// silently treats them as transparent, which is what produced the washed-out
+// "loss of opacity" colors in exported PNGs. html2canvas-pro is a drop-in
+// replacement that exposes the same window.html2canvas global.
 // ---------------------------------------------------------------------------
 
 // Transient toast copy. Localized for the required-languages set; every
@@ -1476,7 +1483,7 @@ var _ivPngErrStr = {
   hr: 'Izvoz PNG-a nije uspio', pl: 'Eksport PNG nie powiódł się',
   fr: 'Échec de l\\'exportation PNG', nl: 'PNG-export mislukt'
 };
-var _ivH2CUrl = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+var _ivH2CUrl = 'https://cdn.jsdelivr.net/npm/html2canvas-pro@2.0.4/dist/html2canvas-pro.min.js';
 
 function _ivLoadHtml2Canvas(cb) {
   if (window.html2canvas) { cb(); return; }
