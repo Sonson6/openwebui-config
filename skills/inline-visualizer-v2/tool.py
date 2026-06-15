@@ -1454,18 +1454,29 @@ function _ivDownload() {
 // ---------------------------------------------------------------------------
 // Download as a PNG image
 // ---------------------------------------------------------------------------
-// Rasterizes the rendered content with html2canvas-pro, lazy-loaded from
+// Rasterizes the rendered content with modern-screenshot, lazy-loaded from
 // the CDN that the iframe CSP already allowlists (loaded only on first PNG
 // click, so the HTML path stays dependency-free). Captures #iv-render so
 // the floating toolbar and loader are never in the shot; falls back to
 // <body> only if that container is somehow missing.
 //
-// html2canvas-pro (not the original html2canvas) is required: charts often
-// use modern CSS color syntax (oklch/oklab/lab/color() and rgb()/hsl() with
-// the "/ alpha" shorthand). The original html2canvas can't parse those and
-// silently treats them as transparent, which is what produced the washed-out
-// "loss of opacity" colors in exported PNGs. html2canvas-pro is a drop-in
-// replacement that exposes the same window.html2canvas global.
+// Why NOT html2canvas (or html2canvas-pro): both rasterize by re-implementing
+// CSS in JS, and they render inline <svg> by serializing each SVG subtree to a
+// standalone data:image/svg+xml. A standalone SVG image is sandboxed from the
+// document's <head> stylesheet, so every external rule is dropped — and almost
+// all of our SVG color comes from external CSS + CSS variables (the .c-* color
+// ramps, `svg text { fill: var(--color-text-primary) }`, etc.). The result was
+// fills/strokes collapsing to their initial values: the washed-out, near-
+// transparent "loss of opacity" the user saw. Swapping html2canvas versions
+// can't fix this — it's inherent to that serialization model.
+//
+// modern-screenshot instead clones the node, inlines *computed* styles (which
+// have already resolved external selectors + CSS variables), embeds it in an
+// <svg><foreignObject>, and lets the browser's own engine paint it. That gives
+// faithful colors/opacity for inline SVG, and it snapshots <canvas> bitmaps
+// (Chart.js/ECharts) too. font:false skips @font-face embedding so the strict
+// CSP's `connect-src 'none'` can't block/hang the capture — our text uses the
+// system `--font-sans` stack, which the SVG renderer resolves natively.
 // ---------------------------------------------------------------------------
 
 // Transient toast copy. Localized for the required-languages set; every
@@ -1483,19 +1494,19 @@ var _ivPngErrStr = {
   hr: 'Izvoz PNG-a nije uspio', pl: 'Eksport PNG nie powiódł się',
   fr: 'Échec de l\\'exportation PNG', nl: 'PNG-export mislukt'
 };
-var _ivH2CUrl = 'https://cdn.jsdelivr.net/npm/html2canvas-pro@2.0.4/dist/html2canvas-pro.min.js';
+var _ivShotUrl = 'https://cdn.jsdelivr.net/npm/modern-screenshot@4.7.0/dist/index.js';
 
-function _ivLoadHtml2Canvas(cb) {
-  if (window.html2canvas) { cb(); return; }
-  var existing = document.getElementById('iv-h2c-loader');
+function _ivLoadShot(cb) {
+  if (window.modernScreenshot) { cb(); return; }
+  var existing = document.getElementById('iv-shot-loader');
   if (existing) {
     existing.addEventListener('load', function() { cb(); });
     existing.addEventListener('error', function() { cb(new Error('load failed')); });
     return;
   }
   var s = document.createElement('script');
-  s.id = 'iv-h2c-loader';
-  s.src = _ivH2CUrl;
+  s.id = 'iv-shot-loader';
+  s.src = _ivShotUrl;
   s.onload = function() { cb(); };
   s.onerror = function() { cb(new Error('load failed')); };
   document.head.appendChild(s);
@@ -1513,28 +1524,28 @@ function _ivDownloadPng() {
     try { toast(_ivPngErrStr[_ivLang] || _ivPngErrStr.en, 'error'); } catch(e) {}
   }
 
-  _ivLoadHtml2Canvas(function(err) {
-    if (err || !window.html2canvas) { fail(); return; }
+  _ivLoadShot(function(err) {
+    var ms = window.modernScreenshot;
+    if (err || !ms || typeof ms.domToBlob !== 'function') { fail(); return; }
     var target = document.getElementById('iv-render') || document.body;
     var styles = getComputedStyle(document.documentElement);
     var bg = (styles.getPropertyValue('--color-bg-primary') || '').trim() || '#ffffff';
-    // Hide the toolbar during capture in case <body> is the fallback target.
+    // Hide the toolbar during capture in case <body> is the fallback target
+    // (#iv-render excludes it, but the fallback path would otherwise catch it).
     var wrap = document.getElementById('iv-dl-wrap');
     if (wrap) wrap.style.visibility = 'hidden';
     function unhide() { if (wrap) wrap.style.visibility = ''; }
     try {
-      window.html2canvas(target, {
+      ms.domToBlob(target, {
+        type: 'image/png',
         backgroundColor: bg,
         scale: Math.min(Math.max(window.devicePixelRatio || 1, 2), 3),
-        useCORS: true,
-        logging: false
-      }).then(function(canvas) {
+        font: false
+      }).then(function(blob) {
         unhide();
-        canvas.toBlob(function(blob) {
-          done();
-          if (!blob) { fail(); return; }
-          _ivSaveBlob(blob, _ivFileBase() + '.png');
-        }, 'image/png');
+        done();
+        if (!blob) { fail(); return; }
+        _ivSaveBlob(blob, _ivFileBase() + '.png');
       }).catch(function() { unhide(); fail(); });
     } catch(e) { unhide(); fail(); }
   });
