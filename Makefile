@@ -47,6 +47,23 @@ apply-prod: ## Push config and functions to the prod instance
 export: ## Pull current state from the dev instance into local files
 	ENV=development python scripts/export.py
 
+# ── Fetch ──────────────────────────────────────────────────────────────────────
+
+BRANCH ?= main
+
+.PHONY: fetch-plugin
+fetch-plugin: ## Fetch specific files from a GitHub repo dir, e.g. make fetch-plugin REPO=Classic298/open-webui-plugins DIR=inline-visualizer-v2 FILES="SKILL.md tool.py" DEST=skills/inline-visualizer-v2 [BRANCH=main]
+	@test -n "$(REPO)" || (echo "REPO is required, e.g. REPO=user/repo" && exit 1)
+	@test -n "$(DIR)" || (echo "DIR is required, e.g. DIR=path/in/repo" && exit 1)
+	@test -n "$(FILES)" || (echo "FILES is required, e.g. FILES=\"SKILL.md tool.py\"" && exit 1)
+	@test -n "$(DEST)" || (echo "DEST is required, e.g. DEST=skills/my-plugin" && exit 1)
+	@mkdir -p $(DEST)
+	@for f in $(FILES); do \
+		echo "Fetching $$f -> $(DEST)/$$f"; \
+		curl -sLf "https://raw.githubusercontent.com/$(REPO)/$(BRANCH)/$(DIR)/$$f" -o "$(DEST)/$$f" \
+			|| (echo "Failed to fetch $$f" && exit 1); \
+	done
+
 # ── Clean ──────────────────────────────────────────────────────────────────────
 
 .PHONY: clean
